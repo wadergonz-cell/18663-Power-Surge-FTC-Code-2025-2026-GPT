@@ -8,14 +8,13 @@ public class ZoomiesMode extends LinearOpMode {
     driveTrainChooChoo driveTrainChooChoo;
     theForbiddenButtons theForbiddenButtons;
 
-    public ZoomiesMode(){
-         RobotHardware = new robotHardware(this);
-         driveTrainChooChoo = new driveTrainChooChoo(RobotHardware);
-         theForbiddenButtons = new theForbiddenButtons(RobotHardware);
-    }
+
 
    // @Override
     public void runOpMode() throws InterruptedException {
+        RobotHardware = new robotHardware(this);
+        driveTrainChooChoo = new driveTrainChooChoo(RobotHardware);
+        theForbiddenButtons = new theForbiddenButtons(RobotHardware);
 
         waitForStart();
 

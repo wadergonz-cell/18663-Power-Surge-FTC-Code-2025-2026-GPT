@@ -4,6 +4,7 @@ import static org.firstinspires.ftc.robotcore.external.BlocksOpModeCompanion.gam
 
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Gamepad;
+import com.qualcomm.robotcore.hardware.Servo;
 
 public class theForbiddenButtons {
     private robotHardware RobotHardware;
@@ -11,12 +12,16 @@ public class theForbiddenButtons {
     final private DcMotor rightOuttakeMotor;
     final private DcMotor intakeMotor;
     final private DcMotor frontIntakeMotor;
+    final private Servo outtakeServo;
+    
+
     public theForbiddenButtons(robotHardware RobotHardware) {
         this.RobotHardware = RobotHardware;
         rightOuttakeMotor = RobotHardware.rightOuttakeMotor;
         leftOuttakeMotor = RobotHardware.leftOuttakeMotor;
         intakeMotor = RobotHardware.intakeMotor;
         frontIntakeMotor = RobotHardware.frontIntakeMotor;
+        outtakeServo = RobotHardware.outtakeServo;
     }
     public void chaoticInputs(Gamepad gamepad1){
 
@@ -55,10 +60,22 @@ public class theForbiddenButtons {
         else {
             intakeMotorSpeed = 0;
         }
-
-
         intakeMotor.setPower(intakeMotorSpeed) ;
         frontIntakeMotor.setPower(intakeMotorSpeed);
+        
+        
+        
+        //Left Bumper
+        boolean flipOuttake = gamepad1.left_bumper;
+        
+            
+        if (flipOuttake) {
+            outtakeServo.setPosition(0.0);
+        } else {
+            outtakeServo.setPosition(0.2);
+        }
+        
+        
     }
 }
 

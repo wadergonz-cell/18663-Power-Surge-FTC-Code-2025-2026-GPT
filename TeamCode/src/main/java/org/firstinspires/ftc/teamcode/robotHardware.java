@@ -6,6 +6,7 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.IMU;
+import com.qualcomm.robotcore.hardware.Servo;
 
 public class robotHardware {
     private HardwareMap hardwareMap;
@@ -27,6 +28,8 @@ public class robotHardware {
     public DcMotor frontIntakeMotor;
 
     public IMU imu;
+
+    public Servo outtakeServo;
 
     public robotHardware(OpMode opMode) {
         this.hardwareMap = opMode.hardwareMap;
@@ -65,6 +68,9 @@ public class robotHardware {
         //Expansion Hub 3
         frontIntakeMotor = hardwareMap.dcMotor.get("frontIntakeMotor");
         frontIntakeMotor.setDirection((DcMotorSimple.Direction.REVERSE));
+
+        //Control Hub 0
+        outtakeServo = hardwareMap.servo.get("outtakeServo");
     }
 
 
