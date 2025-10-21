@@ -11,67 +11,62 @@ import com.qualcomm.robotcore.hardware.Servo;
 public class robotHardware {
     private HardwareMap hardwareMap;
 
-    public DcMotor frontLeftMotor;
-    //Control Hub 3
-    public DcMotor backLeftMotor;
-    //Control Hub 0
-    public DcMotor frontRightMotor;
-    //Control Hub 1
-    public DcMotor backRightMotor;
-    //Expansion Hub 1
-    public DcMotor leftOuttakeMotor;
-    //Expansion Hub 2
-    public DcMotor rightOuttakeMotor;
-    //Expansion Hub 0
-    public DcMotor intakeMotor;
-    //Expansion Hub 3
-    public DcMotor frontIntakeMotor;
+    // === Drive motors ===
+    public DcMotor frontLeftMotor;   // Control Hub 3
+    public DcMotor backLeftMotor;    // Control Hub 0
+    public DcMotor frontRightMotor;  // Control Hub 1
+    public DcMotor backRightMotor;   // Control Hub 2
 
+    // === Mechanisms (motors) ===
+    public DcMotor leftOuttakeMotor;   // Expansion Hub 1
+    public DcMotor rightOuttakeMotor;  // Expansion Hub 2
+    public DcMotor intakeMotor;        // Expansion Hub 0
+    public DcMotor frontIntakeMotor;   // Expansion Hub 3
+
+    // === Servos ===
+    public Servo outtakeServo;         // Control Hub servo 0 (config: "outtakeServo")
+    public Servo ballBlocker;          // Control Hub servo 1 (config: "BallBlocker")
+
+    // === IMU ===
     public IMU imu;
-
-    public Servo outtakeServo;
 
     public robotHardware(OpMode opMode) {
         this.hardwareMap = opMode.hardwareMap;
 
-
-        // Retrieve the IMU from the hardware map
+        // IMU (match your mounting)
         imu = hardwareMap.get(IMU.class, "imu");
-        // Adjust the orientation parameters to match your robot
         IMU.Parameters parameters = new IMU.Parameters(new RevHubOrientationOnRobot(
                 RevHubOrientationOnRobot.LogoFacingDirection.BACKWARD,
                 RevHubOrientationOnRobot.UsbFacingDirection.DOWN));
-
         imu.initialize(parameters);
 
-        frontLeftMotor = hardwareMap.dcMotor.get("frontLeftMotor");
-
-
-        //Control Hub 3
-        backLeftMotor = hardwareMap.dcMotor.get("backLeftMotor");
-
-        //Control Hub 0
+        // Drive motors
+        frontLeftMotor  = hardwareMap.dcMotor.get("frontLeftMotor");
+        backLeftMotor   = hardwareMap.dcMotor.get("backLeftMotor");
         frontRightMotor = hardwareMap.dcMotor.get("frontRightMotor");
+        backRightMotor  = hardwareMap.dcMotor.get("backRightMotor");
+
+        // Your directions
         frontRightMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        //Control Hub 1
-        backRightMotor = hardwareMap.dcMotor.get("backRightMotor");
         backRightMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        //Expansion Hub 1
-         leftOuttakeMotor = hardwareMap.dcMotor.get("leftOuttakeMotor");
 
-        //Expansion Hub 2
+        // Mechanism motors
+        leftOuttakeMotor  = hardwareMap.dcMotor.get("leftOuttakeMotor");
         rightOuttakeMotor = hardwareMap.dcMotor.get("rightOuttakeMotor");
-        rightOuttakeMotor.setDirection((DcMotorSimple.Direction.REVERSE));
-        //Expansion Hub 0
-         intakeMotor = hardwareMap.dcMotor.get("intakeMotor");
+        rightOuttakeMotor.setDirection(DcMotorSimple.Direction.REVERSE);
 
-        //Expansion Hub 3
-        frontIntakeMotor = hardwareMap.dcMotor.get("frontIntakeMotor");
-        frontIntakeMotor.setDirection((DcMotorSimple.Direction.REVERSE));
+        intakeMotor       = hardwareMap.dcMotor.get("intakeMotor");
+        frontIntakeMotor  = hardwareMap.dcMotor.get("frontIntakeMotor");
 
-        //Control Hub 0
+        // FIXED: Reverse both intake motors
+        intakeMotor.setDirection(DcMotorSimple.Direction.REVERSE);
+        frontIntakeMotor.setDirection(DcMotorSimple.Direction.REVERSE);
+
+        // Servos
         outtakeServo = hardwareMap.servo.get("outtakeServo");
+
+        ballBlocker = hardwareMap.servo.get("BallBlocker");
+        // Per your note: reverse the BallBlocker direction and use 0.0 (up) / ~0.40 (down)
+        ballBlocker.setDirection(Servo.Direction.REVERSE);
     }
-
-
 }

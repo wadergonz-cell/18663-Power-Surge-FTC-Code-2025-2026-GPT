@@ -1,86 +1,51 @@
 package org.firstinspires.ftc.teamcode;
 
-import static org.firstinspires.ftc.robotcore.external.BlocksOpModeCompanion.gamepad1;
-
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.Servo;
 
+/**
+ * Button handler for drive motors (servos, slow turn).
+ * Shooting sequence logic is now handled by ShootingSequenceController.
+ */
 public class theForbiddenButtons {
-    private robotHardware RobotHardware;
-    final private DcMotor leftOuttakeMotor;
-    final private DcMotor rightOuttakeMotor;
-    final private DcMotor intakeMotor;
-    final private DcMotor frontIntakeMotor;
-    final private Servo outtakeServo;
-    
+    private final robotHardware RobotHardware;
+
+    // Servos
+    private final Servo outtakeServo;
+    private final Servo blockerServo;
+
+    // Servo positions
+    private static final double OUTTAKE_UP_POS   = 0.45;
+    private static final double OUTTAKE_DOWN_POS = 0.245;
+    private static final double BLOCKER_UP_POS   = 0.00;
+    private static final double BLOCKER_DOWN_POS = 0.40;
 
     public theForbiddenButtons(robotHardware RobotHardware) {
         this.RobotHardware = RobotHardware;
-        rightOuttakeMotor = RobotHardware.rightOuttakeMotor;
-        leftOuttakeMotor = RobotHardware.leftOuttakeMotor;
-        intakeMotor = RobotHardware.intakeMotor;
-        frontIntakeMotor = RobotHardware.frontIntakeMotor;
+
+        // Map hardware
         outtakeServo = RobotHardware.outtakeServo;
+        blockerServo = RobotHardware.ballBlocker;
+
+        // Zero servos at init
+        safeSetServo(outtakeServo, OUTTAKE_UP_POS);
+        safeSetServo(blockerServo, BLOCKER_UP_POS);
     }
-    public void chaoticInputs(Gamepad gamepad1){
 
-// Find if A is pressed on the gamepad. If so, spin each of the outtake motors at max speed
+    /**
+     * Call this every TeleOp loop for non-shooting buttons (if needed).
+     * Most button logic is now in ShootingSequenceController.
+     */
+    public void driveOnlyInputs(Gamepad gamepad1) {
+        // Slow turn with triggers (if you want to keep this)
+        double slowLeft  =  0.20 * gamepad1.left_trigger;
+        double slowRight = -0.20 * gamepad1.right_trigger;
+        // Apply these in driveTrainChooChoo if desired
+    }
 
-        boolean spinOuttakeMotors = gamepad1.a;
-        double outtakeMotorSpeed;
-
-
-
-//get motor speed from gamepad boolean
-        if (spinOuttakeMotors) {
-            outtakeMotorSpeed = 1;
-        }
-        else {
-            outtakeMotorSpeed = 0;
-        }
-
-        rightOuttakeMotor.setPower(outtakeMotorSpeed);
-        leftOuttakeMotor.setPower(outtakeMotorSpeed);
-
-
-
-
-
-
-
-// Find if B is pressed on the gamepad. If so, spin the intake motor at max speed
-        boolean spinIntakeMotor = gamepad1.b;
-        double intakeMotorSpeed;
-
-//get motor speed from gamepad boolean
-        if (spinIntakeMotor) {
-            intakeMotorSpeed = -1;
-        }
-        else {
-            intakeMotorSpeed = 0;
-        }
-        intakeMotor.setPower(intakeMotorSpeed) ;
-        frontIntakeMotor.setPower(intakeMotorSpeed);
-        
-        
-        
-        //Left Bumper
-        boolean flipOuttake = gamepad1.left_bumper;
-        
-            
-        if (flipOuttake) {
-            outtakeServo.setPosition(0.0);
-        } else {
-            outtakeServo.setPosition(0.2);
-        }
-        
-        
+    private void safeSetServo(Servo s, double pos) {
+        double clipped = Math.max(0.0, Math.min(1.0, pos));
+        s.setPosition(clipped);
     }
 }
-
-
-
-
-
-

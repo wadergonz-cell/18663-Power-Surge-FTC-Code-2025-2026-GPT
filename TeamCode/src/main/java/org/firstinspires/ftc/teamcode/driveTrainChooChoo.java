@@ -3,66 +3,75 @@ package org.firstinspires.ftc.teamcode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.IMU;
-import com.qualcomm.robotcore.robot.Robot;
-
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 
+/**
+ * Mecanum drivetrain with field-centric drive (using IMU)
+ * and optional turn override (for auto-aim).
+ */
 public class driveTrainChooChoo {
-    private robotHardware RobotHardware;
 
-    final private DcMotor frontLeftMotor;
-    final private DcMotor frontRightMotor;
-    final private DcMotor backRightMotor;
-    final private DcMotor backLeftMotor;
-    final private IMU imu;
+    private final robotHardware RobotHardware;
 
+    // Motors
+    private final DcMotor frontLeftMotor;
+    private final DcMotor frontRightMotor;
+    private final DcMotor backRightMotor;
+    private final DcMotor backLeftMotor;
 
-    public driveTrainChooChoo(robotHardware RobotHardware){
+    // IMU
+    private final IMU imu;
+
+    // Optional rotation override
+    private Double turnOverride = null;
+
+    public driveTrainChooChoo(robotHardware RobotHardware) {
         this.RobotHardware = RobotHardware;
 
-        frontLeftMotor = RobotHardware.frontLeftMotor;
+        frontLeftMotor  = RobotHardware.frontLeftMotor;
         frontRightMotor = RobotHardware.frontRightMotor;
-        backRightMotor = RobotHardware.backRightMotor;
-        backLeftMotor = RobotHardware.backLeftMotor;
-        imu = RobotHardware.imu;
+        backRightMotor  = RobotHardware.backRightMotor;
+        backLeftMotor   = RobotHardware.backLeftMotor;
+        imu             = RobotHardware.imu;
     }
 
-    public void driveCode(Gamepad gamepad1){
-        double y = -gamepad1.left_stick_y; // Remember, Y stick value is reversed
-        double x = gamepad1.left_stick_x;
-        double rx = gamepad1.right_stick_x;
+    /** Allow external code to override turn (e.g., AprilTag PID). */
+    public void setTurnOverride(Double override) {
+        this.turnOverride = override;
+    }
 
+    /** Call every loop from TeleOp. */
+    public void driveCode(Gamepad gamepad1) {
+        double y  = -gamepad1.left_stick_y; // up is negative on stick
+        double x  =  gamepad1.left_stick_x;
+        double rxDriver = -gamepad1.right_stick_x; // FIXED: inverted turn
+        double rx = (turnOverride != null) ? turnOverride : rxDriver;
 
-        // These track the amount the triggers are pressed, contributing to a slow and more precise turn
-        double slowLeft = (-0.20) * gamepad1.left_trigger;
-        double slowRight = 0.20 * gamepad1.right_trigger;
-        double slowTurn = slowRight + slowLeft;
-
-        // Resets the heading of the field centric drive.
-        //Not using options as this button didnt work on our controller
-
+        // Slow turn with triggers
+        double slowLeft  =  0.20 * gamepad1.left_trigger;
+        double slowRight = -0.20 * gamepad1.right_trigger;
+        double slowTurn  = slowLeft + slowRight;
 
         double botHeading = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
 
-        // Rotate the movement direction counter to the bot's rotation
-        /// removed negatives from (botHeading)
-        double rotX = x * Math.cos(botHeading) + y * Math.sin(-botHeading);
-        double rotY = x * Math.sin(botHeading) - y * Math.cos(-botHeading);
+        // Field-centric transform
+        double rotX = x * Math.cos(botHeading) - y * Math.sin(botHeading);
+        double rotY = x * Math.sin(botHeading) + y * Math.cos(botHeading);
 
-        // Create seperate variables for the trigger turning of the robot
+        rotX *= 1.1; // imperfect strafe compensation
 
+        double denominator = Math.max(Math.abs(rotY) + Math.abs(rotX) + Math.abs(rx), 1.0);
 
-        rotX = rotX * 1.1;  // Counteract imperfect strafing
+        double frontLeftPower  = (rotY + rotX + rx) / denominator;
+        double backLeftPower   = (rotY - rotX + rx) / denominator;
+        double frontRightPower = (rotY - rotX - rx) / denominator;
+        double backRightPower  = (rotY + rotX - rx) / denominator;
 
-        // Denominator is the largest motor power (absolute value) or 1
-        // This ensures all the powers maintain the same ratio,
-        // but only if at least one is out of the range [-1, 1]
-        double denominator = Math.max(Math.abs(rotY) + Math.abs(rotX) + Math.abs(rx), 1);
-
-        double frontLeftPower = ((rotY + rotX + rx) / denominator) +  slowTurn;
-        double backLeftPower = ((rotY - rotX + rx) / denominator) + slowTurn;
-        double frontRightPower = ((rotY - rotX - rx) / denominator) - slowTurn;
-        double backRightPower = ((rotY + rotX - rx) / denominator) - slowTurn;
+        // Apply slow turn after main mix
+        frontLeftPower  += slowTurn;
+        backLeftPower   += slowTurn;
+        frontRightPower -= slowTurn;
+        backRightPower  -= slowTurn;
 
         frontLeftMotor.setPower(frontLeftPower);
         backLeftMotor.setPower(backLeftPower);
