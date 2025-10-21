@@ -22,8 +22,8 @@ public class driveTrainChooChoo {
     // IMU
     private final IMU imu;
 
-    // Optional rotation override
-    private Double turnOverride = null;
+    // Optional rotation assist (overrides driver turn input)
+    private Double turnAssist = null;
 
     public driveTrainChooChoo(robotHardware RobotHardware) {
         this.RobotHardware = RobotHardware;
@@ -35,9 +35,15 @@ public class driveTrainChooChoo {
         imu             = RobotHardware.imu;
     }
 
-    /** Allow external code to override turn (e.g., AprilTag PID). */
+    /** Allow external code to assist turn (e.g., AprilTag PID). */
+    public void setTurnAssist(Double assist) {
+        this.turnAssist = assist;
+    }
+
+    /** @deprecated Use {@link #setTurnAssist(Double)}. */
+    @Deprecated
     public void setTurnOverride(Double override) {
-        this.turnOverride = override;
+        setTurnAssist(override);
     }
 
     /** Call every loop from TeleOp. */
@@ -45,7 +51,7 @@ public class driveTrainChooChoo {
         double y  = -gamepad1.left_stick_y; // up is negative on stick
         double x  =  gamepad1.left_stick_x;
         double rxDriver = -gamepad1.right_stick_x; // FIXED: inverted turn
-        double rx = (turnOverride != null) ? turnOverride : rxDriver;
+        double rx = (turnAssist != null) ? turnAssist : rxDriver;
 
         // Slow turn with triggers
         double slowLeft  =  0.20 * gamepad1.left_trigger;
