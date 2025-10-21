@@ -3,6 +3,7 @@ package org.firstinspires.ftc.teamcode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
+import com.qualcomm.robotcore.util.Range;
 
 /**
  * Manages the shooting sequence state machine.
@@ -28,6 +29,7 @@ public class ShootingSequenceController {
     private static final double INTAKE_FULL_SPEED = 1.0;
     private static final double FRONT_INTAKE_SPEED = -0.7;
     private static final double INTAKE_HOLD_SPEED = 0.35;
+    private static final double INTAKE_ROTATION_SPEED = 0.5;
 
     // State tracking
     private int aClickCount = 0;
@@ -52,11 +54,14 @@ public class ShootingSequenceController {
 
     // Intake rotation tracking for step 5
     private static final double ENCODER_COUNTS_PER_ROTATION = 537.6;
+    private static final int INTAKE_ROTATION_TICKS = (int) Math.round(ENCODER_COUNTS_PER_ROTATION);
     private int intakeStartPosition = 0;
     private boolean waitingForIntakeRotation = false;
 
     // Shooter RPM offset (in inches) — tune this if always short/long
     private static final double SHOOTER_DISTANCE_OFFSET_IN = 0.0;
+    private static final double SHOOTER_MIN_RPM = 80.0;
+    private static final double SHOOTER_MAX_RPM = 200.0;
 
     public ShootingSequenceController(robotHardware hardware) {
         this.leftOuttakeMotor = hardware.leftOuttakeMotor;
@@ -65,6 +70,9 @@ public class ShootingSequenceController {
         this.frontIntakeMotor = hardware.frontIntakeMotor;
         this.outtakeServo = hardware.outtakeServo;
         this.blockerServo = hardware.ballBlocker;
+
+        this.intakeMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        this.intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
     }
 
     /**
@@ -84,7 +92,10 @@ public class ShootingSequenceController {
         // B button: toggle intake
         if (bPressed && !prevB) {
             intakeOn = !intakeOn;
+            intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+            waitingForIntakeRotation = false;
             if (intakeOn) {
+                intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
                 frontIntakeMotor.setPower(FRONT_INTAKE_SPEED);
                 intakeMotor.setPower(INTAKE_FULL_SPEED);
             } else {
@@ -122,10 +133,12 @@ public class ShootingSequenceController {
 
                 // Only start intake if B button already turned it on
                 if (!intakeOn) {
+                    intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
                     intakeMotor.setPower(0.0);
                     frontIntakeMotor.setPower(0.0);
                 } else {
                     // B was already on, so reduce regular intake to 25%
+                    intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
                     intakeMotor.setPower(INTAKE_HOLD_SPEED);
                     frontIntakeMotor.setPower(FRONT_INTAKE_SPEED);
                 }
@@ -158,7 +171,7 @@ public class ShootingSequenceController {
             double distanceWithOffset = tagReport.horizontalRangeIn + SHOOTER_DISTANCE_OFFSET_IN;
             targetRpm = calculateRpmFromDistance(distanceWithOffset);
         } else {
-            targetRpm = 80.0; // fallback middle point
+            targetRpm = SHOOTER_MIN_RPM; // fallback safe value
         }
 
         double motorPower = rpmToPower(targetRpm);
@@ -222,11 +235,19 @@ public class ShootingSequenceController {
                 break;
 
             case 4:
-                // Step 5: Spin intake motor 1.5 rotations
-                if (elapsed < 0.5) {
-                    intakeMotor.setPower(INTAKE_FULL_SPEED);
-                } else {
+                // Step 5: Spin intake motor exactly one rotation at 50% power using encoders
+                if (!waitingForIntakeRotation) {
+                    intakeStartPosition = intakeMotor.getCurrentPosition();
+                    int targetPosition = intakeStartPosition + INTAKE_ROTATION_TICKS;
+                    intakeMotor.setTargetPosition(targetPosition);
+                    intakeMotor.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+                    intakeMotor.setPower(INTAKE_ROTATION_SPEED);
+                    waitingForIntakeRotation = true;
+                } else if (!intakeMotor.isBusy() ||
+                        Math.abs(intakeMotor.getCurrentPosition() - intakeStartPosition) >= INTAKE_ROTATION_TICKS) {
                     intakeMotor.setPower(0.0);
+                    intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+                    waitingForIntakeRotation = false;
                     currentShootingStep++;
                     stepTimer.reset();
                 }
@@ -266,44 +287,21 @@ public class ShootingSequenceController {
         rightOuttakeMotor.setPower(0.0);
         intakeMotor.setPower(0.0);
         frontIntakeMotor.setPower(0.0);
+        intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        waitingForIntakeRotation = false;
         intakeOn = false;
     }
 
     /**
-     * Convert horizontal distance to RPM using the quadratic equation from your testing.
-     * Fitted from: 80 RPM → 32 in, 120 RPM → 84 in, 150 RPM → 95 in
-     *
-     * Quadratic relationship: Distance = -0.00326*RPM² + 1.327*RPM - 34.4
-     * Inverted using quadratic formula to solve for RPM given distance.
+     * Convert horizontal distance to RPM using the quadratic best-fit from on-field testing.
+     * Data points provided: (170 RPM → 72 in), (127 RPM → 64 in), (95 RPM → 42 in).
      */
     private double calculateRpmFromDistance(double distanceIn) {
-        // Quadratic coefficients (from fitting)
-        double qa = -0.00326;
-        double qb = 1.327;
-        double qc = -(34.4 + distanceIn);
-
-        // Quadratic formula: RPM = (-b ± √(b² - 4ac)) / (2a)
-        double discriminant = qb * qb - 4 * qa * qc;
-
-        // If discriminant is negative, no real solution (distance out of range)
-        if (discriminant < 0) {
-            return 80.0; // fallback to minimum safe RPM
-        }
-
-        double sqrt_discriminant = Math.sqrt(discriminant);
-
-        // Two possible solutions; take the positive one that makes physical sense
-        double rpm1 = (-qb + sqrt_discriminant) / (2 * qa);
-        double rpm2 = (-qb - sqrt_discriminant) / (2 * qa);
-
-        // Return the solution that's positive and reasonable (between 0 and ~200 RPM)
-        if (rpm1 >= 0 && rpm1 <= 200) {
-            return rpm1;
-        } else if (rpm2 >= 0 && rpm2 <= 200) {
-            return rpm2;
-        } else {
-            return 80.0; // fallback
-        }
+        double clampedDistance = Math.max(0.0, distanceIn);
+        double rpm = 0.13068181818181818 * clampedDistance * clampedDistance
+                - 12.397727272727273 * clampedDistance
+                + 385.18181818181836;
+        return Range.clip(rpm, SHOOTER_MIN_RPM, SHOOTER_MAX_RPM);
     }
 
     /**

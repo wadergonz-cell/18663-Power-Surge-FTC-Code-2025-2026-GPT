@@ -2,6 +2,8 @@ package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import com.qualcomm.robotcore.util.ElapsedTime;
+import com.qualcomm.robotcore.util.Range;
 
 /**
  * Red Alliance TeleOp with shooting sequence and auto-aim.
@@ -20,6 +22,13 @@ public class ZoomiesMode_RedAlliance extends LinearOpMode {
     private AprilTagHelper vision;
     private AprilTagAim aimPID;
 
+    private final ElapsedTime aimTimer = new ElapsedTime();
+
+    private boolean autoAimEnabled = false;
+    private boolean leftBumperLatch = false;
+    private boolean autoAimTracking = false;
+    private double aimTurnCommand = 0.0;
+
     // Red alliance Tag ID
     private static final int TARGET_ID = 19;
 
@@ -30,6 +39,10 @@ public class ZoomiesMode_RedAlliance extends LinearOpMode {
 
     private static final double OUTPUT_MAX = 0.6;
     private static final double DEADBAND_DEG = 2.0;
+    private static final double AIM_FILTER_ALPHA = 0.45;
+    private static final double AIM_MIN_DT = 0.005;
+    private static final double AIM_MAX_DT = 0.08;
+    private static final double AIM_DRIVER_OVERRIDE = 0.18;
 
     @Override
     public void runOpMode() {
@@ -58,6 +71,12 @@ public class ZoomiesMode_RedAlliance extends LinearOpMode {
             return;
         }
 
+        aimTimer.reset();
+        aimTurnCommand = 0.0;
+        autoAimEnabled = false;
+        leftBumperLatch = false;
+        autoAimTracking = false;
+
         while (opModeIsActive()) {
             // Update vision
             vision.update();
@@ -72,17 +91,43 @@ public class ZoomiesMode_RedAlliance extends LinearOpMode {
                     vision.getYawErrorRad()
             );
 
-            // Handle auto-aim (left bumper)
-            Double turnOverride = null;
-            boolean aimRequested = gamepad1.left_bumper;
-            if (aimRequested && tagReport.hasTag && (tagReport.tagId == TARGET_ID)) {
-                double dt = 0.016; // Approximate 60 Hz
-                double turnCmd = aimPID.update(tagReport.yawCorrectedRad, dt);
-                turnOverride = turnCmd;
-            } else {
+            // Handle auto-aim (left bumper toggle)
+            boolean leftBumper = gamepad1.left_bumper;
+            if (leftBumper && !leftBumperLatch) {
+                autoAimEnabled = !autoAimEnabled;
                 aimPID.reset();
+                aimTurnCommand = 0.0;
+                aimTimer.reset();
             }
-            driveTrainChooChoo.setTurnOverride(turnOverride);
+            leftBumperLatch = leftBumper;
+
+            Double turnAssist = null;
+            autoAimTracking = false;
+            double driverTurnInput = -gamepad1.right_stick_x;
+            boolean driverOverride = Math.abs(driverTurnInput) > AIM_DRIVER_OVERRIDE;
+            if (autoAimEnabled && !driverOverride) {
+                double dt = Range.clip(aimTimer.seconds(), AIM_MIN_DT, AIM_MAX_DT);
+                aimTimer.reset();
+
+                if (tagReport.hasTag && (tagReport.tagId == TARGET_ID)) {
+                    double turnCmd = aimPID.update(tagReport.yawCorrectedRad, dt);
+                    aimTurnCommand = Range.clip(
+                            aimTurnCommand * AIM_FILTER_ALPHA + turnCmd * (1.0 - AIM_FILTER_ALPHA),
+                            -OUTPUT_MAX,
+                            OUTPUT_MAX);
+                    turnAssist = aimTurnCommand;
+                    autoAimTracking = true;
+                } else {
+                    aimPID.reset();
+                    aimTurnCommand = 0.0;
+                }
+            } else {
+                if (!autoAimEnabled || driverOverride) {
+                    aimPID.reset();
+                    aimTurnCommand = 0.0;
+                }
+            }
+            driveTrainChooChoo.setTurnAssist(turnAssist);
 
             // Drive
             driveTrainChooChoo.driveCode(gamepad1);
@@ -102,7 +147,9 @@ public class ZoomiesMode_RedAlliance extends LinearOpMode {
             telemetry.addData("IMU Heading", "%.1f°",
                     RobotHardware.imu.getRobotYawPitchRollAngles().getYaw(
                             org.firstinspires.ftc.robotcore.external.navigation.AngleUnit.DEGREES));
-            telemetry.addData("Auto-Aim", aimRequested);
+            telemetry.addData("Auto-Aim Enabled", autoAimEnabled);
+            telemetry.addData("Auto-Aim Tracking", autoAimTracking);
+            telemetry.addData("Auto-Aim Turn", "%.2f", aimTurnCommand);
 
             telemetry.addLine("\n=== SHOOTING ===");
             telemetry.addData("A Clicks", shootingSequence.getAClickCount());
@@ -111,7 +158,8 @@ public class ZoomiesMode_RedAlliance extends LinearOpMode {
             telemetry.addData("Shots Fired", shootingSequence.getShotsFired());
 
             telemetry.addLine("\n=== VISION (Red / ID 19) ===");
-            telemetry.addData("LB Auto-Aim", aimRequested);
+            telemetry.addData("LB Auto-Aim Enabled", autoAimEnabled);
+            telemetry.addData("LB Tracking", autoAimTracking);
             telemetry.addData("Has Tag", tagReport.hasTag);
             telemetry.addData("Tag ID", tagReport.tagId);
             telemetry.addData("Distance (in)", "%.1f", tagReport.horizontalRangeIn);
