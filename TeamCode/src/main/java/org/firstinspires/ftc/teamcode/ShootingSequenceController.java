@@ -28,7 +28,7 @@ public class ShootingSequenceController {
     // Intake speeds
     private static final double INTAKE_FULL_SPEED = 1.0;
     private static final double FRONT_INTAKE_SPEED = -0.7;
-    private static final double INTAKE_HOLD_SPEED = 0.35;
+    private static final double INTAKE_HOLD_SPEED = 0.3;
     private static final double INTAKE_ROTATION_SPEED = 0.5;
 
     // State tracking
@@ -55,13 +55,44 @@ public class ShootingSequenceController {
     // Intake rotation tracking for step 5
     private static final double ENCODER_COUNTS_PER_ROTATION = 537.6;
     private static final int INTAKE_ROTATION_TICKS = (int) Math.round(ENCODER_COUNTS_PER_ROTATION);
+    private static final int INTAKE_HALF_ROTATION_TICKS = (int) Math.round(ENCODER_COUNTS_PER_ROTATION * 0.5);
     private int intakeStartPosition = 0;
     private boolean waitingForIntakeRotation = false;
+    private int intakeMoveTicks = 0;
 
     // Shooter RPM offset (in inches) — tune this if always short/long
-    private static final double SHOOTER_DISTANCE_OFFSET_IN = 0.0;
+    private static final double SHOOTER_DISTANCE_OFFSET_IN = 30.0;
     private static final double SHOOTER_MIN_RPM = 80.0;
     private static final double SHOOTER_MAX_RPM = 200.0;
+    /** Positive values lower the requested target RPM to counter overshoot. */
+    private static final double LEFT_SHOOTER_TARGET_RPM_OFFSET = 2.0;
+    /** Positive values lower the requested target RPM to counter overshoot. */
+    private static final double RIGHT_SHOOTER_TARGET_RPM_OFFSET = 42.0;
+    private static final double SHOOTER_COUNTS_PER_REV = 537.6;
+    private static final double SHOOTER_RPM_FILTER_ALPHA = 0.25;
+    // Left shooter PID gains (tune independently from the right side)
+    private static final double LEFT_SHOOTER_PID_KP = 0.000000000000000005;
+    private static final double LEFT_SHOOTER_PID_KI = 0.000;
+    private static final double LEFT_SHOOTER_PID_KD = 0.00;
+    // Right shooter PID gains
+    private static final double RIGHT_SHOOTER_PID_KP = 0.00000000000000005;
+    private static final double RIGHT_SHOOTER_PID_KI = 0.00;
+    private static final double RIGHT_SHOOTER_PID_KD = 0.00;
+
+    // Shooter velocity control
+    private final ShooterPidController leftShooterPid = new ShooterPidController(
+            LEFT_SHOOTER_PID_KP, LEFT_SHOOTER_PID_KI, LEFT_SHOOTER_PID_KD, SHOOTER_MAX_RPM);
+    private final ShooterPidController rightShooterPid = new ShooterPidController(
+            RIGHT_SHOOTER_PID_KP, RIGHT_SHOOTER_PID_KI, RIGHT_SHOOTER_PID_KD, SHOOTER_MAX_RPM);
+    private final ElapsedTime shooterTimer = new ElapsedTime();
+    private boolean shooterPidEnabled = false;
+    private double targetShooterRpmBase = 0.0;
+    private double targetLeftShooterRpm = 0.0;
+    private double targetRightShooterRpm = 0.0;
+    private double filteredLeftShooterRpm = 0.0;
+    private double filteredRightShooterRpm = 0.0;
+    private int lastLeftShooterPosition = 0;
+    private int lastRightShooterPosition = 0;
 
     public ShootingSequenceController(robotHardware hardware) {
         this.leftOuttakeMotor = hardware.leftOuttakeMotor;
@@ -70,6 +101,17 @@ public class ShootingSequenceController {
         this.frontIntakeMotor = hardware.frontIntakeMotor;
         this.outtakeServo = hardware.outtakeServo;
         this.blockerServo = hardware.ballBlocker;
+
+        this.leftOuttakeMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        this.rightOuttakeMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        this.leftOuttakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        this.rightOuttakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        this.leftOuttakeMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+        this.rightOuttakeMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+
+        lastLeftShooterPosition = this.leftOuttakeMotor.getCurrentPosition();
+        lastRightShooterPosition = this.rightOuttakeMotor.getCurrentPosition();
+        shooterTimer.reset();
 
         this.intakeMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         this.intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
@@ -122,6 +164,8 @@ public class ShootingSequenceController {
         if (shootingState != ShootingState.IDLE) {
             updateShootingSequence(tagReport);
         }
+
+        updateShooterVelocityControl();
     }
 
     private void handleAClick(AprilTagCalibration.Report tagReport) {
@@ -174,9 +218,7 @@ public class ShootingSequenceController {
             targetRpm = SHOOTER_MIN_RPM; // fallback safe value
         }
 
-        double motorPower = rpmToPower(targetRpm);
-        leftOuttakeMotor.setPower(motorPower);
-        rightOuttakeMotor.setPower(motorPower);
+        enableShooterPid(targetRpm);
     }
 
     private void updateShootingSequence(AprilTagCalibration.Report tagReport) {
@@ -195,7 +237,28 @@ public class ShootingSequenceController {
         // Each step has a duration; adjust timing as needed
         switch (currentShootingStep) {
             case 0:
-                // Step 1: Adjust motor RPM if distance changed
+                // Step 1: Retract intake by half a rotation at 50% power (reverse)
+                if (!waitingForIntakeRotation) {
+                    intakeStartPosition = intakeMotor.getCurrentPosition();
+                    intakeMoveTicks = INTAKE_HALF_ROTATION_TICKS;
+                    int targetPosition = intakeStartPosition - intakeMoveTicks;
+                    intakeMotor.setTargetPosition(targetPosition);
+                    intakeMotor.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+                    intakeMotor.setPower(INTAKE_ROTATION_SPEED);
+                    waitingForIntakeRotation = true;
+                } else if (!intakeMotor.isBusy()
+                        || Math.abs(intakeMotor.getCurrentPosition() - intakeStartPosition) >= intakeMoveTicks) {
+                    intakeMotor.setPower(0.0);
+                    intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+                    waitingForIntakeRotation = false;
+                    intakeMoveTicks = 0;
+                    currentShootingStep++;
+                    stepTimer.reset();
+                }
+                break;
+
+            case 1:
+                // Step 2: Adjust motor RPM if distance changed
                 if (elapsed < 0.1) {
                     spinUpMotors(tagReport);
                 } else {
@@ -204,8 +267,8 @@ public class ShootingSequenceController {
                 }
                 break;
 
-            case 1:
-                // Step 2: Raise outtake servo (shoot first ball)
+            case 2:
+                // Step 3: Raise outtake servo (shoot first ball)
                 if (elapsed < 0.2) {
                     outtakeServo.setPosition(OUTTAKE_DOWN_POS);
                 } else {
@@ -214,8 +277,8 @@ public class ShootingSequenceController {
                 }
                 break;
 
-            case 2:
-                // Step 3: Raise blocker servo
+            case 3:
+                // Step 4: Raise blocker servo
                 if (elapsed < 0.2) {
                     blockerServo.setPosition(BLOCKER_UP_POS);
                 } else {
@@ -224,8 +287,8 @@ public class ShootingSequenceController {
                 }
                 break;
 
-            case 3:
-                // Step 4: Lower outtake servo
+            case 4:
+                // Step 5: Lower outtake servo
                 if (elapsed < 0.2) {
                     outtakeServo.setPosition(OUTTAKE_UP_POS);
                 } else {
@@ -234,27 +297,29 @@ public class ShootingSequenceController {
                 }
                 break;
 
-            case 4:
-                // Step 5: Spin intake motor exactly one rotation at 50% power using encoders
+            case 5:
+                // Step 6: Spin intake motor forward one rotation at 50% power using encoders
                 if (!waitingForIntakeRotation) {
                     intakeStartPosition = intakeMotor.getCurrentPosition();
-                    int targetPosition = intakeStartPosition + INTAKE_ROTATION_TICKS;
+                    intakeMoveTicks = INTAKE_ROTATION_TICKS;
+                    int targetPosition = intakeStartPosition + intakeMoveTicks;
                     intakeMotor.setTargetPosition(targetPosition);
                     intakeMotor.setMode(DcMotor.RunMode.RUN_TO_POSITION);
                     intakeMotor.setPower(INTAKE_ROTATION_SPEED);
                     waitingForIntakeRotation = true;
                 } else if (!intakeMotor.isBusy() ||
-                        Math.abs(intakeMotor.getCurrentPosition() - intakeStartPosition) >= INTAKE_ROTATION_TICKS) {
+                        Math.abs(intakeMotor.getCurrentPosition() - intakeStartPosition) >= intakeMoveTicks) {
                     intakeMotor.setPower(0.0);
                     intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
                     waitingForIntakeRotation = false;
+                    intakeMoveTicks = 0;
                     currentShootingStep++;
                     stepTimer.reset();
                 }
                 break;
 
-            case 5:
-                // Step 6: Lower blocker servo
+            case 6:
+                // Step 7: Lower blocker servo
                 if (elapsed < 0.2) {
                     blockerServo.setPosition(BLOCKER_DOWN_POS);
                 } else {
@@ -264,6 +329,7 @@ public class ShootingSequenceController {
                         shootingState = ShootingState.IDLE;
                         aClickCount = 0;
                         yClickCount = 0;
+                        stopShooterPid();
                     } else {
                         // Repeat steps
                         currentShootingStep = 0;
@@ -272,6 +338,93 @@ public class ShootingSequenceController {
                 }
                 break;
         }
+    }
+
+    private void updateShooterVelocityControl() {
+        if (!shooterPidEnabled) {
+            shooterTimer.reset();
+            filteredLeftShooterRpm = 0.0;
+            filteredRightShooterRpm = 0.0;
+            return;
+        }
+
+        double dt = shooterTimer.seconds();
+        shooterTimer.reset();
+        if (dt <= 0.0) {
+            dt = 0.001;
+        } else if (dt > 0.5) {
+            dt = 0.5;
+        }
+
+        int currentLeftPosition = leftOuttakeMotor.getCurrentPosition();
+        int currentRightPosition = rightOuttakeMotor.getCurrentPosition();
+
+        double leftDelta = currentLeftPosition - lastLeftShooterPosition;
+        double rightDelta = currentRightPosition - lastRightShooterPosition;
+        lastLeftShooterPosition = currentLeftPosition;
+        lastRightShooterPosition = currentRightPosition;
+
+        double leftRawRpm = ticksToRpm(leftDelta, dt);
+        double rightRawRpm = ticksToRpm(rightDelta, dt);
+
+        filteredLeftShooterRpm = applyFilter(filteredLeftShooterRpm, leftRawRpm, SHOOTER_RPM_FILTER_ALPHA);
+        filteredRightShooterRpm = applyFilter(filteredRightShooterRpm, rightRawRpm, SHOOTER_RPM_FILTER_ALPHA);
+
+        double leftPower = leftShooterPid.update(targetLeftShooterRpm, filteredLeftShooterRpm, dt);
+        double rightPower = rightShooterPid.update(targetRightShooterRpm, filteredRightShooterRpm, dt);
+
+        leftOuttakeMotor.setPower(leftPower);
+        rightOuttakeMotor.setPower(rightPower);
+    }
+
+    private void enableShooterPid(double targetRpm) {
+        double clippedTarget = Range.clip(targetRpm, SHOOTER_MIN_RPM, SHOOTER_MAX_RPM);
+        targetShooterRpmBase = clippedTarget;
+
+        targetLeftShooterRpm = Range.clip(
+                clippedTarget - LEFT_SHOOTER_TARGET_RPM_OFFSET,
+                SHOOTER_MIN_RPM,
+                SHOOTER_MAX_RPM);
+        targetRightShooterRpm = Range.clip(
+                clippedTarget - RIGHT_SHOOTER_TARGET_RPM_OFFSET,
+                SHOOTER_MIN_RPM,
+                SHOOTER_MAX_RPM);
+
+        if (!shooterPidEnabled) {
+            shooterPidEnabled = true;
+            shooterTimer.reset();
+            lastLeftShooterPosition = leftOuttakeMotor.getCurrentPosition();
+            lastRightShooterPosition = rightOuttakeMotor.getCurrentPosition();
+            filteredLeftShooterRpm = 0.0;
+            filteredRightShooterRpm = 0.0;
+            leftShooterPid.reset();
+            rightShooterPid.reset();
+        }
+    }
+
+    private void stopShooterPid() {
+        if (shooterPidEnabled) {
+            shooterPidEnabled = false;
+            leftOuttakeMotor.setPower(0.0);
+            rightOuttakeMotor.setPower(0.0);
+            leftShooterPid.reset();
+            rightShooterPid.reset();
+        }
+        targetShooterRpmBase = 0.0;
+        targetLeftShooterRpm = 0.0;
+        targetRightShooterRpm = 0.0;
+    }
+
+    private double ticksToRpm(double deltaTicks, double dtSeconds) {
+        double revs = deltaTicks / SHOOTER_COUNTS_PER_REV;
+        return (revs / dtSeconds) * 60.0;
+    }
+
+    private double applyFilter(double previous, double raw, double alpha) {
+        if (Double.isNaN(raw) || Double.isInfinite(raw)) {
+            return previous;
+        }
+        return previous + alpha * (raw - previous);
     }
 
     private void cancelSequence() {
@@ -283,8 +436,7 @@ public class ShootingSequenceController {
 
         outtakeServo.setPosition(OUTTAKE_DOWN_POS);
         blockerServo.setPosition(BLOCKER_UP_POS);
-        leftOuttakeMotor.setPower(0.0);
-        rightOuttakeMotor.setPower(0.0);
+        stopShooterPid();
         intakeMotor.setPower(0.0);
         frontIntakeMotor.setPower(0.0);
         intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
@@ -304,19 +456,82 @@ public class ShootingSequenceController {
         return Range.clip(rpm, SHOOTER_MIN_RPM, SHOOTER_MAX_RPM);
     }
 
-    /**
-     * Convert RPM to motor power (0.0 to 1.0).
-     * Adjust based on your motor's max RPM.
-     */
-    private double rpmToPower(double rpm) {
-        double maxRpm = 1000.0; // Adjust for your motor
-        return Math.max(0.0, Math.min(1.0, rpm / maxRpm));
-    }
-
     // Getters for telemetry
     public int getAClickCount() { return aClickCount; }
     public int getYClickCount() { return yClickCount; }
     public ShootingState getShootingState() { return shootingState; }
     public int getShotsFired() { return shotsFired; }
     public boolean isIntakeOn() { return intakeOn; }
+    public boolean isShooterPidEnabled() { return shooterPidEnabled; }
+
+    public double getTargetShooterRpm() { return targetShooterRpmBase; }
+    public double getLeftTargetShooterRpm() { return targetLeftShooterRpm; }
+    public double getRightTargetShooterRpm() { return targetRightShooterRpm; }
+    public double getLeftShooterRpm() { return filteredLeftShooterRpm; }
+    public double getRightShooterRpm() { return filteredRightShooterRpm; }
+
+    private static class ShooterPidController {
+        private final double kP;
+        private final double kI;
+        private final double kD;
+        private final double integralLimit;
+
+        private double integral;
+        private double previousError;
+        private boolean firstUpdate = true;
+
+        ShooterPidController(double kP, double kI, double kD, double integralLimit) {
+            this.kP = kP;
+            this.kI = kI;
+            this.kD = kD;
+            this.integralLimit = Math.abs(integralLimit);
+        }
+
+        double update(double targetRpm, double measuredRpm, double dtSeconds) {
+            if (targetRpm <= 0.0) {
+                // No target – let the caller cut power entirely.
+                reset();
+                return 0.0;
+            }
+
+            double error = targetRpm - measuredRpm;
+            if (error < 0.0) {
+                // If we are overspeed, allow the flywheel to coast by only trimming
+                // power through the feedforward term (no braking).
+                error = 0.0;
+                integral = 0.0;
+            } else {
+                integral += error * dtSeconds;
+                integral = clipIntegral(integral);
+            }
+
+            double derivative = 0.0;
+            if (!firstUpdate && dtSeconds > 0.0) {
+                double errorDelta = error - previousError;
+                if (errorDelta > 0.0) {
+                    derivative = errorDelta / dtSeconds;
+                }
+            }
+
+            firstUpdate = false;
+            previousError = error;
+
+            double feedforward = targetRpm / SHOOTER_MAX_RPM;
+            double correction = kP * error + kI * integral + kD * derivative;
+            return Range.clip(feedforward + Math.max(0.0, correction), 0.0, 1.0);
+        }
+
+        void reset() {
+            integral = 0.0;
+            previousError = 0.0;
+            firstUpdate = true;
+        }
+
+        private double clipIntegral(double value) {
+            if (integralLimit <= 0.0) {
+                return value;
+            }
+            return Math.max(-integralLimit, Math.min(integralLimit, value));
+        }
+    }
 }

@@ -12,6 +12,7 @@ import com.qualcomm.robotcore.util.Range;
  * - B button: Toggle intake
  * - Left bumper: Optional auto-aim towards Tag ID 20
  */
+// Sync marker: updated on 2025-10-21 22:57 UTC
 @TeleOp(name = "zoomies - blue alliance", group = "TeleOp")
 public class ZoomiesMode_BlueAlliance extends LinearOpMode {
 
@@ -20,25 +21,16 @@ public class ZoomiesMode_BlueAlliance extends LinearOpMode {
     private theForbiddenButtons theForbiddenButtons;
     private ShootingSequenceController shootingSequence;
     private AprilTagHelper vision;
-    private AprilTagAim aimPID;
-
     private final ElapsedTime aimTimer = new ElapsedTime();
 
     private boolean autoAimEnabled = false;
     private boolean leftBumperLatch = false;
     private boolean autoAimTracking = false;
-    private double aimTurnCommand = 0.0;
+    private double filteredAimErrorRad = 0.0;
 
     // Blue alliance Tag ID
     private static final int TARGET_ID = 20;
 
-    // PID gains (tune on-field)
-    private static final double KP = 4.0;
-    private static final double KI = 0.10;
-    private static final double KD = 4.0;
-
-    private static final double OUTPUT_MAX = 0.6;
-    private static final double DEADBAND_DEG = 2.0;
     private static final double AIM_FILTER_ALPHA = 0.45; // higher = smoother, lower = quicker
     private static final double AIM_MIN_DT = 0.005;
     private static final double AIM_MAX_DT = 0.08;
@@ -54,12 +46,6 @@ public class ZoomiesMode_BlueAlliance extends LinearOpMode {
         vision = new AprilTagHelper(hardwareMap);
         vision.init();
 
-        aimPID = new AprilTagAim(KP, KI, KD)
-                .setOutputMax(OUTPUT_MAX)
-                .setIntegralMax(0.4)
-                .setDeadbandRad(Math.toRadians(DEADBAND_DEG))
-                .setInvert(true);
-
         telemetry.addLine("Blue Auto-Aim TeleOp Ready");
         telemetry.addLine("A: Shoot sequence  |  B: Intake toggle  |  Y: Add shot  |  X: Cancel");
         telemetry.addLine("LB: Auto-aim (Tag ID 20)");
@@ -72,7 +58,7 @@ public class ZoomiesMode_BlueAlliance extends LinearOpMode {
         }
 
         aimTimer.reset();
-        aimTurnCommand = 0.0;
+        filteredAimErrorRad = 0.0;
         autoAimEnabled = false;
         leftBumperLatch = false;
         autoAimTracking = false;
@@ -95,8 +81,7 @@ public class ZoomiesMode_BlueAlliance extends LinearOpMode {
             boolean leftBumper = gamepad1.left_bumper;
             if (leftBumper && !leftBumperLatch) {
                 autoAimEnabled = !autoAimEnabled;
-                aimPID.reset();
-                aimTurnCommand = 0.0;
+                filteredAimErrorRad = 0.0;
                 aimTimer.reset();
             }
             leftBumperLatch = leftBumper;
@@ -110,24 +95,21 @@ public class ZoomiesMode_BlueAlliance extends LinearOpMode {
                 aimTimer.reset();
 
                 if (tagReport.hasTag && (tagReport.tagId == TARGET_ID)) {
-                    double turnCmd = aimPID.update(tagReport.yawCorrectedRad, dt);
-                    aimTurnCommand = Range.clip(
-                            aimTurnCommand * AIM_FILTER_ALPHA + turnCmd * (1.0 - AIM_FILTER_ALPHA),
-                            -OUTPUT_MAX,
-                            OUTPUT_MAX);
-                    turnAssist = aimTurnCommand;
+                    double rawError = tagReport.yawCorrectedRad;
+                    filteredAimErrorRad = filteredAimErrorRad * AIM_FILTER_ALPHA
+                            + rawError * (1.0 - AIM_FILTER_ALPHA);
+                    turnAssist = filteredAimErrorRad;
                     autoAimTracking = true;
                 } else {
-                    aimPID.reset();
-                    aimTurnCommand = 0.0;
+                    filteredAimErrorRad = 0.0;
                 }
             } else {
                 if (!autoAimEnabled || driverOverride) {
-                    aimPID.reset();
-                    aimTurnCommand = 0.0;
+                    filteredAimErrorRad = 0.0;
                 }
             }
             driveTrainChooChoo.setTurnAssist(turnAssist);
+            autoAimTracking = autoAimTracking && driveTrainChooChoo.isTurnAssistActive();
 
             // Drive
             driveTrainChooChoo.driveCode(gamepad1);
@@ -149,13 +131,19 @@ public class ZoomiesMode_BlueAlliance extends LinearOpMode {
                             org.firstinspires.ftc.robotcore.external.navigation.AngleUnit.DEGREES));
             telemetry.addData("Auto-Aim Enabled", autoAimEnabled);
             telemetry.addData("Auto-Aim Tracking", autoAimTracking);
-            telemetry.addData("Auto-Aim Turn", "%.2f", aimTurnCommand);
+            telemetry.addData("Auto-Aim Error (deg)", "%.2f", Math.toDegrees(filteredAimErrorRad));
+            telemetry.addData("Auto-Aim Turn PID", "%.2f", driveTrainChooChoo.getTurnAssistOutput());
 
             telemetry.addLine("\n=== SHOOTING ===");
             telemetry.addData("A Clicks", shootingSequence.getAClickCount());
             telemetry.addData("Y Count (shots)", shootingSequence.getYClickCount());
             telemetry.addData("State", shootingSequence.getShootingState());
             telemetry.addData("Shots Fired", shootingSequence.getShotsFired());
+            telemetry.addData("Shooter PID", shootingSequence.isShooterPidEnabled());
+            telemetry.addData("Shooter Target RPM", "%.1f", shootingSequence.getTargetShooterRpm());
+            telemetry.addData("Shooter RPM L/R", "%.1f / %.1f",
+                    shootingSequence.getLeftShooterRpm(),
+                    shootingSequence.getRightShooterRpm());
 
             telemetry.addLine("\n=== VISION (Blue / ID 20) ===");
             telemetry.addData("LB Auto-Aim Enabled", autoAimEnabled);

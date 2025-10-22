@@ -7,11 +7,11 @@ package org.firstinspires.ftc.teamcode;
 public class AprilTagCalibration {
 
     // === USER TUNABLES ===
-    public static double TAG_SIZE_IN = 3.96;             // black-square size
-    public static double APRIL_TAG_CENTER_HEIGHT_IN = 38.625;
+    public static double TAG_SIZE_IN = 8.35;             // black-square size
+    public static double APRIL_TAG_CENTER_HEIGHT_IN = 29.5;
     public static double CAMERA_HEIGHT_IN           = 14.25;
     public static double CAMERA_PITCH_DEG           = 21.0;   // +down
-    public static double CAMERA_YAW_OFFSET_DEG      = 0.0;    // +left
+    public static double CAMERA_YAW_OFFSET_DEG      = 10.0;    // +left
 
     // Optional intrinsics (at stream size)
     public static double FX = 600, FY = 600, CX = 320, CY = 240;
