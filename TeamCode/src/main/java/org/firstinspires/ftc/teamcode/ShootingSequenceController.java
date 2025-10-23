@@ -1,3 +1,4 @@
+// File: TeamCode/src/main/java/org/firstinspires/ftc/teamcode/ShootingSequenceController.java
 package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.hardware.DcMotor;
@@ -52,39 +53,42 @@ public class ShootingSequenceController {
     private ElapsedTime stepTimer = new ElapsedTime();
     private int currentShootingStep = 0;
 
-    // Intake rotation tracking for step 5
+    // Intake rotation targets (tune here for quick adjustments)
+    private static final double INTAKE_REVERSE_ROTATIONS = 0.1; // retract a quarter turn for consistent staging
+    private static final double INTAKE_FORWARD_ROTATIONS = 0.8;  // advance one turn to feed the next ring
     private static final double ENCODER_COUNTS_PER_ROTATION = 537.6;
-    private static final int INTAKE_ROTATION_TICKS = (int) Math.round(ENCODER_COUNTS_PER_ROTATION);
-    private static final int INTAKE_HALF_ROTATION_TICKS = (int) Math.round(ENCODER_COUNTS_PER_ROTATION * 0.5);
+    private static final int INTAKE_REVERSE_TICKS = (int) Math.max(1,
+            Math.round(ENCODER_COUNTS_PER_ROTATION * INTAKE_REVERSE_ROTATIONS));
+    private static final int INTAKE_FORWARD_TICKS = (int) Math.max(1,
+            Math.round(ENCODER_COUNTS_PER_ROTATION * INTAKE_FORWARD_ROTATIONS));
     private int intakeStartPosition = 0;
     private boolean waitingForIntakeRotation = false;
     private int intakeMoveTicks = 0;
 
-    // Shooter RPM offset (in inches) — tune this if always short/long
-    private static final double SHOOTER_DISTANCE_OFFSET_IN = 30.0;
-    private static final double SHOOTER_MIN_RPM = 80.0;
-    private static final double SHOOTER_MAX_RPM = 200.0;
-    /** Positive values lower the requested target RPM to counter overshoot. */
-    private static final double LEFT_SHOOTER_TARGET_RPM_OFFSET = 2.0;
-    /** Positive values lower the requested target RPM to counter overshoot. */
-    private static final double RIGHT_SHOOTER_TARGET_RPM_OFFSET = 42.0;
+    // Shooter RPM target and limits
+    private static final double SHOOTER_TARGET_RPM = 120.0;
+    private static final double SHOOTER_POWER_MAX = 1.0;
+    private static final double SHOOTER_RAMP_DURATION_S = 0.75;
+    private static final double SHOOTER_RAMP_MAX_POWER = 0.5;
     private static final double SHOOTER_COUNTS_PER_REV = 537.6;
     private static final double SHOOTER_RPM_FILTER_ALPHA = 0.25;
+    private static final double SHOOTER_PID_INTEGRAL_LIMIT = 1.0;
     // Left shooter PID gains (tune independently from the right side)
-    private static final double LEFT_SHOOTER_PID_KP = 0.000000000000000005;
-    private static final double LEFT_SHOOTER_PID_KI = 0.000;
-    private static final double LEFT_SHOOTER_PID_KD = 0.00;
+    private static final double LEFT_SHOOTER_PID_KP = 0.015;
+    private static final double LEFT_SHOOTER_PID_KI = 0.0;
+    private static final double LEFT_SHOOTER_PID_KD = 0.0008;
     // Right shooter PID gains
-    private static final double RIGHT_SHOOTER_PID_KP = 0.00000000000000005;
-    private static final double RIGHT_SHOOTER_PID_KI = 0.00;
-    private static final double RIGHT_SHOOTER_PID_KD = 0.00;
+    private static final double RIGHT_SHOOTER_PID_KP = 0.015;
+    private static final double RIGHT_SHOOTER_PID_KI = 0.0;
+    private static final double RIGHT_SHOOTER_PID_KD = 0.0008;
 
     // Shooter velocity control
     private final ShooterPidController leftShooterPid = new ShooterPidController(
-            LEFT_SHOOTER_PID_KP, LEFT_SHOOTER_PID_KI, LEFT_SHOOTER_PID_KD, SHOOTER_MAX_RPM);
+            LEFT_SHOOTER_PID_KP, LEFT_SHOOTER_PID_KI, LEFT_SHOOTER_PID_KD, SHOOTER_PID_INTEGRAL_LIMIT);
     private final ShooterPidController rightShooterPid = new ShooterPidController(
-            RIGHT_SHOOTER_PID_KP, RIGHT_SHOOTER_PID_KI, RIGHT_SHOOTER_PID_KD, SHOOTER_MAX_RPM);
+            RIGHT_SHOOTER_PID_KP, RIGHT_SHOOTER_PID_KI, RIGHT_SHOOTER_PID_KD, SHOOTER_PID_INTEGRAL_LIMIT);
     private final ElapsedTime shooterTimer = new ElapsedTime();
+    private final ElapsedTime shooterRampTimer = new ElapsedTime();
     private boolean shooterPidEnabled = false;
     private double targetShooterRpmBase = 0.0;
     private double targetLeftShooterRpm = 0.0;
@@ -93,6 +97,8 @@ public class ShootingSequenceController {
     private double filteredRightShooterRpm = 0.0;
     private int lastLeftShooterPosition = 0;
     private int lastRightShooterPosition = 0;
+    private double lastLeftShooterPowerCommand = 0.0;
+    private double lastRightShooterPowerCommand = 0.0;
 
     public ShootingSequenceController(robotHardware hardware) {
         this.leftOuttakeMotor = hardware.leftOuttakeMotor;
@@ -156,19 +162,19 @@ public class ShootingSequenceController {
         // A button state machine
         if (aPressed && !prevA) {
             aClickCount++;
-            handleAClick(tagReport);
+            handleAClick();
         }
         prevA = aPressed;
 
         // Run shooting sequence if active
         if (shootingState != ShootingState.IDLE) {
-            updateShootingSequence(tagReport);
+            updateShootingSequence();
         }
 
         updateShooterVelocityControl();
     }
 
-    private void handleAClick(AprilTagCalibration.Report tagReport) {
+    private void handleAClick() {
         switch (aClickCount) {
             case 1:
                 // First click: prepare for shooting
@@ -191,7 +197,7 @@ public class ShootingSequenceController {
             case 2:
                 // Second click: spin up motors
                 shootingState = ShootingState.SPINUP;
-                spinUpMotors(tagReport);
+                spinUpMotors();
                 break;
 
             case 3:
@@ -209,22 +215,14 @@ public class ShootingSequenceController {
         }
     }
 
-    private void spinUpMotors(AprilTagCalibration.Report tagReport) {
-        double targetRpm;
-        if (tagReport.hasTag && tagReport.horizontalRangeIn <= 65.0) {
-            double distanceWithOffset = tagReport.horizontalRangeIn + SHOOTER_DISTANCE_OFFSET_IN;
-            targetRpm = calculateRpmFromDistance(distanceWithOffset);
-        } else {
-            targetRpm = SHOOTER_MIN_RPM; // fallback safe value
-        }
-
-        enableShooterPid(targetRpm);
+    private void spinUpMotors() {
+        enableShooterPid();
     }
 
-    private void updateShootingSequence(AprilTagCalibration.Report tagReport) {
+    private void updateShootingSequence() {
         if (shootingState == ShootingState.SPINUP) {
             // Continuously adjust RPM during spinup phase
-            spinUpMotors(tagReport);
+            spinUpMotors();
             return;
         }
 
@@ -237,10 +235,10 @@ public class ShootingSequenceController {
         // Each step has a duration; adjust timing as needed
         switch (currentShootingStep) {
             case 0:
-                // Step 1: Retract intake by half a rotation at 50% power (reverse)
+                // Step 1: Retract intake by the configured reverse rotation at 50% power
                 if (!waitingForIntakeRotation) {
                     intakeStartPosition = intakeMotor.getCurrentPosition();
-                    intakeMoveTicks = INTAKE_HALF_ROTATION_TICKS;
+                    intakeMoveTicks = INTAKE_REVERSE_TICKS;
                     int targetPosition = intakeStartPosition - intakeMoveTicks;
                     intakeMotor.setTargetPosition(targetPosition);
                     intakeMotor.setMode(DcMotor.RunMode.RUN_TO_POSITION);
@@ -260,7 +258,7 @@ public class ShootingSequenceController {
             case 1:
                 // Step 2: Adjust motor RPM if distance changed
                 if (elapsed < 0.1) {
-                    spinUpMotors(tagReport);
+                    spinUpMotors();
                 } else {
                     currentShootingStep++;
                     stepTimer.reset();
@@ -298,10 +296,10 @@ public class ShootingSequenceController {
                 break;
 
             case 5:
-                // Step 6: Spin intake motor forward one rotation at 50% power using encoders
+                // Step 6: Spin intake motor forward by the configured rotation at 50% power using encoders
                 if (!waitingForIntakeRotation) {
                     intakeStartPosition = intakeMotor.getCurrentPosition();
-                    intakeMoveTicks = INTAKE_ROTATION_TICKS;
+                    intakeMoveTicks = INTAKE_FORWARD_TICKS;
                     int targetPosition = intakeStartPosition + intakeMoveTicks;
                     intakeMotor.setTargetPosition(targetPosition);
                     intakeMotor.setMode(DcMotor.RunMode.RUN_TO_POSITION);
@@ -345,6 +343,8 @@ public class ShootingSequenceController {
             shooterTimer.reset();
             filteredLeftShooterRpm = 0.0;
             filteredRightShooterRpm = 0.0;
+            lastLeftShooterPowerCommand = 0.0;
+            lastRightShooterPowerCommand = 0.0;
             return;
         }
 
@@ -373,26 +373,25 @@ public class ShootingSequenceController {
         double leftPower = leftShooterPid.update(targetLeftShooterRpm, filteredLeftShooterRpm, dt);
         double rightPower = rightShooterPid.update(targetRightShooterRpm, filteredRightShooterRpm, dt);
 
-        leftOuttakeMotor.setPower(leftPower);
-        rightOuttakeMotor.setPower(rightPower);
+        double limitedLeft = limitShooterPower(leftPower);
+        double limitedRight = limitShooterPower(rightPower);
+
+        leftOuttakeMotor.setPower(limitedLeft);
+        rightOuttakeMotor.setPower(limitedRight);
+
+        lastLeftShooterPowerCommand = limitedLeft;
+        lastRightShooterPowerCommand = limitedRight;
     }
 
-    private void enableShooterPid(double targetRpm) {
-        double clippedTarget = Range.clip(targetRpm, SHOOTER_MIN_RPM, SHOOTER_MAX_RPM);
-        targetShooterRpmBase = clippedTarget;
-
-        targetLeftShooterRpm = Range.clip(
-                clippedTarget - LEFT_SHOOTER_TARGET_RPM_OFFSET,
-                SHOOTER_MIN_RPM,
-                SHOOTER_MAX_RPM);
-        targetRightShooterRpm = Range.clip(
-                clippedTarget - RIGHT_SHOOTER_TARGET_RPM_OFFSET,
-                SHOOTER_MIN_RPM,
-                SHOOTER_MAX_RPM);
+    private void enableShooterPid() {
+        targetShooterRpmBase = SHOOTER_TARGET_RPM;
+        targetLeftShooterRpm = SHOOTER_TARGET_RPM;
+        targetRightShooterRpm = SHOOTER_TARGET_RPM;
 
         if (!shooterPidEnabled) {
             shooterPidEnabled = true;
             shooterTimer.reset();
+            shooterRampTimer.reset();
             lastLeftShooterPosition = leftOuttakeMotor.getCurrentPosition();
             lastRightShooterPosition = rightOuttakeMotor.getCurrentPosition();
             filteredLeftShooterRpm = 0.0;
@@ -413,6 +412,16 @@ public class ShootingSequenceController {
         targetShooterRpmBase = 0.0;
         targetLeftShooterRpm = 0.0;
         targetRightShooterRpm = 0.0;
+        lastLeftShooterPowerCommand = 0.0;
+        lastRightShooterPowerCommand = 0.0;
+    }
+
+    private double limitShooterPower(double requestedPower) {
+        double clipped = Range.clip(requestedPower, 0.0, SHOOTER_POWER_MAX);
+        if (shooterRampTimer.seconds() < SHOOTER_RAMP_DURATION_S) {
+            clipped = Math.min(clipped, SHOOTER_RAMP_MAX_POWER);
+        }
+        return clipped;
     }
 
     private double ticksToRpm(double deltaTicks, double dtSeconds) {
@@ -444,18 +453,6 @@ public class ShootingSequenceController {
         intakeOn = false;
     }
 
-    /**
-     * Convert horizontal distance to RPM using the quadratic best-fit from on-field testing.
-     * Data points provided: (170 RPM → 72 in), (127 RPM → 64 in), (95 RPM → 42 in).
-     */
-    private double calculateRpmFromDistance(double distanceIn) {
-        double clampedDistance = Math.max(0.0, distanceIn);
-        double rpm = 0.13068181818181818 * clampedDistance * clampedDistance
-                - 12.397727272727273 * clampedDistance
-                + 385.18181818181836;
-        return Range.clip(rpm, SHOOTER_MIN_RPM, SHOOTER_MAX_RPM);
-    }
-
     // Getters for telemetry
     public int getAClickCount() { return aClickCount; }
     public int getYClickCount() { return yClickCount; }
@@ -469,6 +466,16 @@ public class ShootingSequenceController {
     public double getRightTargetShooterRpm() { return targetRightShooterRpm; }
     public double getLeftShooterRpm() { return filteredLeftShooterRpm; }
     public double getRightShooterRpm() { return filteredRightShooterRpm; }
+    public double getLeftShooterPowerCommand() { return lastLeftShooterPowerCommand; }
+    public double getRightShooterPowerCommand() { return lastRightShooterPowerCommand; }
+
+    public ShooterPidTelemetry getLeftShooterPidTelemetry() {
+        return leftShooterPid.getLastTelemetry();
+    }
+
+    public ShooterPidTelemetry getRightShooterPidTelemetry() {
+        return rightShooterPid.getLastTelemetry();
+    }
 
     private static class ShooterPidController {
         private final double kP;
@@ -480,51 +487,69 @@ public class ShootingSequenceController {
         private double previousError;
         private boolean firstUpdate = true;
 
+        private double lastTargetRpm;
+        private double lastMeasuredRpm;
+        private double lastErrorRpm;
+        private double lastDerivative;
+        private double lastPTerm;
+        private double lastITerm;
+        private double lastDTerm;
+        private double lastOutput;
+
         ShooterPidController(double kP, double kI, double kD, double integralLimit) {
             this.kP = kP;
             this.kI = kI;
             this.kD = kD;
             this.integralLimit = Math.abs(integralLimit);
+            clearTelemetry();
         }
 
         double update(double targetRpm, double measuredRpm, double dtSeconds) {
             if (targetRpm <= 0.0) {
-                // No target – let the caller cut power entirely.
                 reset();
+                lastMeasuredRpm = measuredRpm;
                 return 0.0;
             }
 
+            double safeDt = dtSeconds > 0.0 ? dtSeconds : 1e-3;
             double error = targetRpm - measuredRpm;
-            if (error < 0.0) {
-                // If we are overspeed, allow the flywheel to coast by only trimming
-                // power through the feedforward term (no braking).
-                error = 0.0;
-                integral = 0.0;
+
+            integral += error * safeDt;
+            integral = clipIntegral(integral);
+
+            double derivative;
+            if (firstUpdate) {
+                derivative = 0.0;
+                firstUpdate = false;
             } else {
-                integral += error * dtSeconds;
-                integral = clipIntegral(integral);
+                derivative = (error - previousError) / safeDt;
             }
 
-            double derivative = 0.0;
-            if (!firstUpdate && dtSeconds > 0.0) {
-                double errorDelta = error - previousError;
-                if (errorDelta > 0.0) {
-                    derivative = errorDelta / dtSeconds;
-                }
-            }
-
-            firstUpdate = false;
             previousError = error;
 
-            double feedforward = targetRpm / SHOOTER_MAX_RPM;
-            double correction = kP * error + kI * integral + kD * derivative;
-            return Range.clip(feedforward + Math.max(0.0, correction), 0.0, 1.0);
+            double pTerm = kP * error;
+            double iTerm = kI * integral;
+            double dTerm = kD * derivative;
+
+            double output = Range.clip(pTerm + iTerm + dTerm, 0.0, 1.0);
+
+            lastTargetRpm = targetRpm;
+            lastMeasuredRpm = measuredRpm;
+            lastErrorRpm = error;
+            lastDerivative = derivative;
+            lastPTerm = pTerm;
+            lastITerm = iTerm;
+            lastDTerm = dTerm;
+            lastOutput = output;
+
+            return output;
         }
 
         void reset() {
             integral = 0.0;
             previousError = 0.0;
             firstUpdate = true;
+            clearTelemetry();
         }
 
         private double clipIntegral(double value) {
@@ -532,6 +557,63 @@ public class ShootingSequenceController {
                 return value;
             }
             return Math.max(-integralLimit, Math.min(integralLimit, value));
+        }
+
+        private void clearTelemetry() {
+            lastTargetRpm = 0.0;
+            lastMeasuredRpm = 0.0;
+            lastErrorRpm = 0.0;
+            lastDerivative = 0.0;
+            lastPTerm = 0.0;
+            lastITerm = 0.0;
+            lastDTerm = 0.0;
+            lastOutput = 0.0;
+        }
+
+        ShooterPidTelemetry getLastTelemetry() {
+            return new ShooterPidTelemetry(
+                    lastTargetRpm,
+                    lastMeasuredRpm,
+                    lastErrorRpm,
+                    lastPTerm,
+                    lastITerm,
+                    lastDTerm,
+                    lastDerivative,
+                    lastOutput,
+                    integral
+            );
+        }
+    }
+
+    public static class ShooterPidTelemetry {
+        public final double targetRpm;
+        public final double measuredRpm;
+        public final double errorRpm;
+        public final double pTerm;
+        public final double iTerm;
+        public final double dTerm;
+        public final double derivativeRpmPerSec;
+        public final double output;
+        public final double integralState;
+
+        ShooterPidTelemetry(double targetRpm,
+                            double measuredRpm,
+                            double errorRpm,
+                            double pTerm,
+                            double iTerm,
+                            double dTerm,
+                            double derivativeRpmPerSec,
+                            double output,
+                            double integralState) {
+            this.targetRpm = targetRpm;
+            this.measuredRpm = measuredRpm;
+            this.errorRpm = errorRpm;
+            this.pTerm = pTerm;
+            this.iTerm = iTerm;
+            this.dTerm = dTerm;
+            this.derivativeRpmPerSec = derivativeRpmPerSec;
+            this.output = output;
+            this.integralState = integralState;
         }
     }
 }

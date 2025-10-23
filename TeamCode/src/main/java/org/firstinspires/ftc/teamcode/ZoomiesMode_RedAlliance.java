@@ -1,3 +1,4 @@
+// File: TeamCode/src/main/java/org/firstinspires/ftc/teamcode/ZoomiesMode_RedAlliance.java
 package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
@@ -132,7 +133,16 @@ public class ZoomiesMode_RedAlliance extends LinearOpMode {
             telemetry.addData("Auto-Aim Enabled", autoAimEnabled);
             telemetry.addData("Auto-Aim Tracking", autoAimTracking);
             telemetry.addData("Auto-Aim Error (deg)", "%.2f", Math.toDegrees(filteredAimErrorRad));
-            telemetry.addData("Auto-Aim Turn PID", "%.2f", driveTrainChooChoo.getTurnAssistOutput());
+            driveTrainChooChoo.TurnAssistPidTelemetry turnPid = driveTrainChooChoo.getTurnAssistTelemetry();
+            telemetry.addData("Auto-Aim Turn PID",
+                    "out=%.2f | raw=%.2f° err=%.2f° | P=%.3f I=%.3f D=%.3f | I=%.3f",
+                    turnPid.output,
+                    Math.toDegrees(turnPid.invertedErrorRad),
+                    Math.toDegrees(turnPid.pidErrorRad),
+                    turnPid.pTerm,
+                    turnPid.iTerm,
+                    turnPid.dTerm,
+                    turnPid.integralState);
 
             telemetry.addLine("\n=== SHOOTING ===");
             telemetry.addData("A Clicks", shootingSequence.getAClickCount());
@@ -144,6 +154,23 @@ public class ZoomiesMode_RedAlliance extends LinearOpMode {
             telemetry.addData("Shooter RPM L/R", "%.1f / %.1f",
                     shootingSequence.getLeftShooterRpm(),
                     shootingSequence.getRightShooterRpm());
+            ShootingSequenceController.ShooterPidTelemetry leftPid = shootingSequence.getLeftShooterPidTelemetry();
+            ShootingSequenceController.ShooterPidTelemetry rightPid = shootingSequence.getRightShooterPidTelemetry();
+            telemetry.addData("Shooter Motor Power L/R", "%.2f / %.2f",
+                    shootingSequence.getLeftShooterPowerCommand(),
+                    shootingSequence.getRightShooterPowerCommand());
+            telemetry.addData("PID L", "err=%.1f | P=%.3f I=%.3f D=%.3f | out=%.2f",
+                    leftPid.errorRpm,
+                    leftPid.pTerm,
+                    leftPid.iTerm,
+                    leftPid.dTerm,
+                    leftPid.output);
+            telemetry.addData("PID R", "err=%.1f | P=%.3f I=%.3f D=%.3f | out=%.2f",
+                    rightPid.errorRpm,
+                    rightPid.pTerm,
+                    rightPid.iTerm,
+                    rightPid.dTerm,
+                    rightPid.output);
 
             telemetry.addLine("\n=== VISION (Red / ID 19) ===");
             telemetry.addData("LB Auto-Aim Enabled", autoAimEnabled);

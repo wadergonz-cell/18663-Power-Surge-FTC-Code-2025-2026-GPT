@@ -1,3 +1,4 @@
+// File: TeamCode/src/main/java/org/firstinspires/ftc/teamcode/driveTrainChooChoo.java
 package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.hardware.DcMotor;
@@ -138,9 +139,50 @@ public class driveTrainChooChoo {
         return lastTurnAssistOutput;
     }
 
+    /** Latest PID telemetry for debugging auto-aim turn assist. */
+    public TurnAssistPidTelemetry getTurnAssistTelemetry() {
+        return turnAssistPid.getLastTelemetry();
+    }
+
     /** Whether the PID-based turn assist is active. */
     public boolean isTurnAssistActive() {
         return turnAssistErrorRad != null;
+    }
+
+    /** Encapsulates the most recent PID terms for telemetry. */
+    public static class TurnAssistPidTelemetry {
+        public final double inputYawErrorRad;
+        public final double invertedErrorRad;
+        public final double pidErrorRad;
+        public final double pTerm;
+        public final double iTerm;
+        public final double dTerm;
+        public final double integralState;
+        public final double derivative;
+        public final double dtSeconds;
+        public final double output;
+
+        TurnAssistPidTelemetry(double inputYawErrorRad,
+                               double invertedErrorRad,
+                               double pidErrorRad,
+                               double pTerm,
+                               double iTerm,
+                               double dTerm,
+                               double integralState,
+                               double derivative,
+                               double dtSeconds,
+                               double output) {
+            this.inputYawErrorRad = inputYawErrorRad;
+            this.invertedErrorRad = invertedErrorRad;
+            this.pidErrorRad = pidErrorRad;
+            this.pTerm = pTerm;
+            this.iTerm = iTerm;
+            this.dTerm = dTerm;
+            this.integralState = integralState;
+            this.derivative = derivative;
+            this.dtSeconds = dtSeconds;
+            this.output = output;
+        }
     }
 
     /** Simple PID used to convert yaw error into a turn command. */
@@ -149,38 +191,87 @@ public class driveTrainChooChoo {
         private double previousError = 0.0;
         private boolean first = true;
 
+        private double lastInputYawErrorRad = 0.0;
+        private double lastInvertedErrorRad = 0.0;
+        private double lastPidErrorRad = 0.0;
+        private double lastPTerm = 0.0;
+        private double lastITerm = 0.0;
+        private double lastDTerm = 0.0;
+        private double lastIntegralState = 0.0;
+        private double lastDerivative = 0.0;
+        private double lastDtSeconds = 0.0;
+        private double lastOutput = 0.0;
+
         double update(double yawErrorRad, double dt) {
-            double error = yawErrorRad;
-            if (TURN_ASSIST_INVERT) {
-                error = -error;
-            }
+            double processedError = TURN_ASSIST_INVERT ? -yawErrorRad : yawErrorRad;
+            double pidError = Math.abs(processedError) < TURN_ASSIST_DEADBAND_RAD ? 0.0 : processedError;
 
-            if (Math.abs(error) < TURN_ASSIST_DEADBAND_RAD) {
-                error = 0.0;
-            }
-
-            integral += error * dt;
+            integral += pidError * dt;
             integral = Range.clip(integral, -TURN_ASSIST_I_MAX, TURN_ASSIST_I_MAX);
 
             double derivative = 0.0;
+            double safeDt = Math.max(dt, 1e-3);
             if (!first) {
-                derivative = (error - previousError) / Math.max(dt, 1e-3);
+                derivative = (pidError - previousError) / safeDt;
             }
 
-            double output = (TURN_ASSIST_KP * error)
-                    + (TURN_ASSIST_KI * integral)
-                    + (TURN_ASSIST_KD * derivative);
+            double pTerm = TURN_ASSIST_KP * pidError;
+            double iTerm = TURN_ASSIST_KI * integral;
+            double dTerm = TURN_ASSIST_KD * derivative;
 
-            previousError = error;
+            double output = pTerm + iTerm + dTerm;
+            output = Range.clip(output, -TURN_ASSIST_MAX_OUTPUT, TURN_ASSIST_MAX_OUTPUT);
+
+            previousError = pidError;
             first = false;
 
-            return Range.clip(output, -TURN_ASSIST_MAX_OUTPUT, TURN_ASSIST_MAX_OUTPUT);
+            lastInputYawErrorRad = yawErrorRad;
+            lastInvertedErrorRad = processedError;
+            lastPidErrorRad = pidError;
+            lastPTerm = pTerm;
+            lastITerm = iTerm;
+            lastDTerm = dTerm;
+            lastIntegralState = integral;
+            lastDerivative = derivative;
+            lastDtSeconds = safeDt;
+            lastOutput = output;
+
+            return output;
+        }
+
+        TurnAssistPidTelemetry getLastTelemetry() {
+            return new TurnAssistPidTelemetry(
+                    lastInputYawErrorRad,
+                    lastInvertedErrorRad,
+                    lastPidErrorRad,
+                    lastPTerm,
+                    lastITerm,
+                    lastDTerm,
+                    lastIntegralState,
+                    lastDerivative,
+                    lastDtSeconds,
+                    lastOutput
+            );
         }
 
         void reset() {
             integral = 0.0;
             previousError = 0.0;
             first = true;
+            clearTelemetry();
+        }
+
+        private void clearTelemetry() {
+            lastInputYawErrorRad = 0.0;
+            lastInvertedErrorRad = 0.0;
+            lastPidErrorRad = 0.0;
+            lastPTerm = 0.0;
+            lastITerm = 0.0;
+            lastDTerm = 0.0;
+            lastIntegralState = 0.0;
+            lastDerivative = 0.0;
+            lastDtSeconds = 0.0;
+            lastOutput = 0.0;
         }
     }
 }

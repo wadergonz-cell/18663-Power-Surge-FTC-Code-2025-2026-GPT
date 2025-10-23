@@ -7,7 +7,7 @@ package org.firstinspires.ftc.teamcode;
 public class AprilTagCalibration {
 
     // === USER TUNABLES ===
-    public static double TAG_SIZE_IN = 8.35;             // black-square size
+    public static double TAG_SIZE_IN = 3.35;             // black-square size 8.35
     public static double APRIL_TAG_CENTER_HEIGHT_IN = 29.5;
     public static double CAMERA_HEIGHT_IN           = 14.25;
     public static double CAMERA_PITCH_DEG           = 21.0;   // +down
