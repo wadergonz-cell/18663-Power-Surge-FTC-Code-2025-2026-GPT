@@ -113,7 +113,7 @@ public class ZoomiesMode_BlueAlliance extends LinearOpMode {
             autoAimTracking = autoAimTracking && driveTrainChooChoo.isTurnAssistActive();
 
             // Drive
-            driveTrainChooChoo.driveCode(gamepad1);
+            driveTrainChooChoo.driveFieldCentric(gamepad1);
             theForbiddenButtons.driveOnlyInputs(gamepad1);
 
             // Shooting sequence controller (uses AprilTag distance)
@@ -143,34 +143,33 @@ public class ZoomiesMode_BlueAlliance extends LinearOpMode {
                     turnPid.iTerm,
                     turnPid.dTerm,
                     turnPid.integralState);
+            driveTrainChooChoo.FieldCentricDebug debug = driveTrainChooChoo.getFieldCentricDebug();
+            telemetry.addData("Field Centric", debug.fieldCentricEnabled);
+            telemetry.addData("Raw XY/Turn", "%.2f %.2f | %.2f", debug.rawX, debug.rawY, debug.rawTurn);
+            telemetry.addData("Rot XY", "%.2f %.2f", debug.rotatedX, debug.rotatedY);
+            telemetry.addData("Heading", "%.1f°", debug.headingDeg);
+            telemetry.addData("Turn Assist", "%s | out=%.2f | applied=%.2f | slow=%.2f",
+                    debug.turnAssistActive ? "ON" : "OFF",
+                    debug.turnAssistOutput,
+                    debug.appliedTurn,
+                    debug.slowTurn);
+            telemetry.addData("Motor Power", "FL %.2f | FR %.2f | BL %.2f | BR %.2f",
+                    debug.frontLeftPower,
+                    debug.frontRightPower,
+                    debug.backLeftPower,
+                    debug.backRightPower);
 
             telemetry.addLine("\n=== SHOOTING ===");
             telemetry.addData("A Clicks", shootingSequence.getAClickCount());
             telemetry.addData("Y Count (shots)", shootingSequence.getYClickCount());
             telemetry.addData("State", shootingSequence.getShootingState());
             telemetry.addData("Shots Fired", shootingSequence.getShotsFired());
-            telemetry.addData("Shooter PID", shootingSequence.isShooterPidEnabled());
-            telemetry.addData("Shooter Target RPM", "%.1f", shootingSequence.getTargetShooterRpm());
-            telemetry.addData("Shooter RPM L/R", "%.1f / %.1f",
-                    shootingSequence.getLeftShooterRpm(),
-                    shootingSequence.getRightShooterRpm());
-            ShootingSequenceController.ShooterPidTelemetry leftPid = shootingSequence.getLeftShooterPidTelemetry();
-            ShootingSequenceController.ShooterPidTelemetry rightPid = shootingSequence.getRightShooterPidTelemetry();
-            telemetry.addData("Shooter Motor Power L/R", "%.2f / %.2f",
-                    shootingSequence.getLeftShooterPowerCommand(),
-                    shootingSequence.getRightShooterPowerCommand());
-            telemetry.addData("PID L", "err=%.1f | P=%.3f I=%.3f D=%.3f | out=%.2f",
-                    leftPid.errorRpm,
-                    leftPid.pTerm,
-                    leftPid.iTerm,
-                    leftPid.dTerm,
-                    leftPid.output);
-            telemetry.addData("PID R", "err=%.1f | P=%.3f I=%.3f D=%.3f | out=%.2f",
-                    rightPid.errorRpm,
-                    rightPid.pTerm,
-                    rightPid.iTerm,
-                    rightPid.dTerm,
-                    rightPid.output);
+            telemetry.addData("Shooter Spinning", shootingSequence.isShooterSpinning());
+            telemetry.addData("Shooter Target Power", "%.2f", ShootingSequenceController.SHOOTER_SPIN_POWER);
+            telemetry.addData("Commanded Power", "%.2f", shootingSequence.getShooterPowerCommand());
+            telemetry.addData("Motor Power L/R", "%.2f / %.2f",
+                    RobotHardware.leftOuttakeMotor.getPower(),
+                    RobotHardware.rightOuttakeMotor.getPower());
 
             telemetry.addLine("\n=== VISION (Blue / ID 20) ===");
             telemetry.addData("LB Auto-Aim Enabled", autoAimEnabled);

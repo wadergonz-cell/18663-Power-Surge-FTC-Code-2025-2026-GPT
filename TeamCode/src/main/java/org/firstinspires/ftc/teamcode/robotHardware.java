@@ -3,6 +3,7 @@ package org.firstinspires.ftc.teamcode;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.IMU;
@@ -18,8 +19,8 @@ public class robotHardware {
     public DcMotor backRightMotor;   // Control Hub 2
 
     // === Mechanisms (motors) ===
-    public DcMotor leftOuttakeMotor;   // Expansion Hub 1
-    public DcMotor rightOuttakeMotor;  // Expansion Hub 2
+    public DcMotorEx leftOuttakeMotor;   // Expansion Hub 1
+    public DcMotorEx rightOuttakeMotor;  // Expansion Hub 2
     public DcMotor intakeMotor;        // Expansion Hub 0
     public DcMotor frontIntakeMotor;   // Expansion Hub 3
 
@@ -51,8 +52,8 @@ public class robotHardware {
         backRightMotor.setDirection(DcMotorSimple.Direction.REVERSE);
 
         // Mechanism motors
-        leftOuttakeMotor  = hardwareMap.dcMotor.get("leftOuttakeMotor");
-        rightOuttakeMotor = hardwareMap.dcMotor.get("rightOuttakeMotor");
+        leftOuttakeMotor  = hardwareMap.get(DcMotorEx.class, "leftOuttakeMotor");
+        rightOuttakeMotor = hardwareMap.get(DcMotorEx.class, "rightOuttakeMotor");
         rightOuttakeMotor.setDirection(DcMotorSimple.Direction.REVERSE);
 
         intakeMotor       = hardwareMap.dcMotor.get("intakeMotor");

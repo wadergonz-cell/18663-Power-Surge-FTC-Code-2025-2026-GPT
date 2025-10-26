@@ -2,9 +2,9 @@
 package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
-import com.qualcomm.robotcore.util.Range;
 
 /**
  * Manages the shooting sequence state machine.
@@ -13,8 +13,8 @@ import com.qualcomm.robotcore.util.Range;
 public class ShootingSequenceController {
 
     // Hardware references
-    private final DcMotor leftOuttakeMotor;
-    private final DcMotor rightOuttakeMotor;
+    private final DcMotorEx leftOuttakeMotor;
+    private final DcMotorEx rightOuttakeMotor;
     private final DcMotor intakeMotor;
     private final DcMotor frontIntakeMotor;
     private final Servo outtakeServo;
@@ -54,7 +54,7 @@ public class ShootingSequenceController {
     private int currentShootingStep = 0;
 
     // Intake rotation targets (tune here for quick adjustments)
-    private static final double INTAKE_REVERSE_ROTATIONS = 0.1; // retract a quarter turn for consistent staging
+    private static final double INTAKE_REVERSE_ROTATIONS = 0.0; // retract a quarter turn for consistent staging
     private static final double INTAKE_FORWARD_ROTATIONS = 0.8;  // advance one turn to feed the next ring
     private static final double ENCODER_COUNTS_PER_ROTATION = 537.6;
     private static final int INTAKE_REVERSE_TICKS = (int) Math.max(1,
@@ -65,40 +65,10 @@ public class ShootingSequenceController {
     private boolean waitingForIntakeRotation = false;
     private int intakeMoveTicks = 0;
 
-    // Shooter RPM target and limits
-    private static final double SHOOTER_TARGET_RPM = 120.0;
-    private static final double SHOOTER_POWER_MAX = 1.0;
-    private static final double SHOOTER_RAMP_DURATION_S = 0.75;
-    private static final double SHOOTER_RAMP_MAX_POWER = 0.5;
-    private static final double SHOOTER_COUNTS_PER_REV = 537.6;
-    private static final double SHOOTER_RPM_FILTER_ALPHA = 0.25;
-    private static final double SHOOTER_PID_INTEGRAL_LIMIT = 1.0;
-    // Left shooter PID gains (tune independently from the right side)
-    private static final double LEFT_SHOOTER_PID_KP = 0.015;
-    private static final double LEFT_SHOOTER_PID_KI = 0.0;
-    private static final double LEFT_SHOOTER_PID_KD = 0.0008;
-    // Right shooter PID gains
-    private static final double RIGHT_SHOOTER_PID_KP = 0.015;
-    private static final double RIGHT_SHOOTER_PID_KI = 0.0;
-    private static final double RIGHT_SHOOTER_PID_KD = 0.0008;
-
-    // Shooter velocity control
-    private final ShooterPidController leftShooterPid = new ShooterPidController(
-            LEFT_SHOOTER_PID_KP, LEFT_SHOOTER_PID_KI, LEFT_SHOOTER_PID_KD, SHOOTER_PID_INTEGRAL_LIMIT);
-    private final ShooterPidController rightShooterPid = new ShooterPidController(
-            RIGHT_SHOOTER_PID_KP, RIGHT_SHOOTER_PID_KI, RIGHT_SHOOTER_PID_KD, SHOOTER_PID_INTEGRAL_LIMIT);
-    private final ElapsedTime shooterTimer = new ElapsedTime();
-    private final ElapsedTime shooterRampTimer = new ElapsedTime();
-    private boolean shooterPidEnabled = false;
-    private double targetShooterRpmBase = 0.0;
-    private double targetLeftShooterRpm = 0.0;
-    private double targetRightShooterRpm = 0.0;
-    private double filteredLeftShooterRpm = 0.0;
-    private double filteredRightShooterRpm = 0.0;
-    private int lastLeftShooterPosition = 0;
-    private int lastRightShooterPosition = 0;
-    private double lastLeftShooterPowerCommand = 0.0;
-    private double lastRightShooterPowerCommand = 0.0;
+    // Shooter power (constant)
+    public static final double SHOOTER_SPIN_POWER = 1.0;
+    private boolean shooterSpinning = false;
+    private double currentShooterPowerCommand = 0.0;
 
     public ShootingSequenceController(robotHardware hardware) {
         this.leftOuttakeMotor = hardware.leftOuttakeMotor;
@@ -114,10 +84,6 @@ public class ShootingSequenceController {
         this.rightOuttakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         this.leftOuttakeMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
         this.rightOuttakeMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
-
-        lastLeftShooterPosition = this.leftOuttakeMotor.getCurrentPosition();
-        lastRightShooterPosition = this.rightOuttakeMotor.getCurrentPosition();
-        shooterTimer.reset();
 
         this.intakeMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         this.intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
@@ -170,8 +136,6 @@ public class ShootingSequenceController {
         if (shootingState != ShootingState.IDLE) {
             updateShootingSequence();
         }
-
-        updateShooterVelocityControl();
     }
 
     private void handleAClick() {
@@ -216,12 +180,12 @@ public class ShootingSequenceController {
     }
 
     private void spinUpMotors() {
-        enableShooterPid();
+        startShooter();
     }
 
     private void updateShootingSequence() {
         if (shootingState == ShootingState.SPINUP) {
-            // Continuously adjust RPM during spinup phase
+            // Keep motors at target power during spinup phase
             spinUpMotors();
             return;
         }
@@ -256,7 +220,7 @@ public class ShootingSequenceController {
                 break;
 
             case 1:
-                // Step 2: Adjust motor RPM if distance changed
+                // Step 2: Hold shooter power before firing
                 if (elapsed < 0.1) {
                     spinUpMotors();
                 } else {
@@ -327,7 +291,7 @@ public class ShootingSequenceController {
                         shootingState = ShootingState.IDLE;
                         aClickCount = 0;
                         yClickCount = 0;
-                        stopShooterPid();
+                        stopShooter();
                     } else {
                         // Repeat steps
                         currentShootingStep = 0;
@@ -337,103 +301,18 @@ public class ShootingSequenceController {
                 break;
         }
     }
-
-    private void updateShooterVelocityControl() {
-        if (!shooterPidEnabled) {
-            shooterTimer.reset();
-            filteredLeftShooterRpm = 0.0;
-            filteredRightShooterRpm = 0.0;
-            lastLeftShooterPowerCommand = 0.0;
-            lastRightShooterPowerCommand = 0.0;
-            return;
-        }
-
-        double dt = shooterTimer.seconds();
-        shooterTimer.reset();
-        if (dt <= 0.0) {
-            dt = 0.001;
-        } else if (dt > 0.5) {
-            dt = 0.5;
-        }
-
-        int currentLeftPosition = leftOuttakeMotor.getCurrentPosition();
-        int currentRightPosition = rightOuttakeMotor.getCurrentPosition();
-
-        double leftDelta = currentLeftPosition - lastLeftShooterPosition;
-        double rightDelta = currentRightPosition - lastRightShooterPosition;
-        lastLeftShooterPosition = currentLeftPosition;
-        lastRightShooterPosition = currentRightPosition;
-
-        double leftRawRpm = ticksToRpm(leftDelta, dt);
-        double rightRawRpm = ticksToRpm(rightDelta, dt);
-
-        filteredLeftShooterRpm = applyFilter(filteredLeftShooterRpm, leftRawRpm, SHOOTER_RPM_FILTER_ALPHA);
-        filteredRightShooterRpm = applyFilter(filteredRightShooterRpm, rightRawRpm, SHOOTER_RPM_FILTER_ALPHA);
-
-        double leftPower = leftShooterPid.update(targetLeftShooterRpm, filteredLeftShooterRpm, dt);
-        double rightPower = rightShooterPid.update(targetRightShooterRpm, filteredRightShooterRpm, dt);
-
-        double limitedLeft = limitShooterPower(leftPower);
-        double limitedRight = limitShooterPower(rightPower);
-
-        leftOuttakeMotor.setPower(limitedLeft);
-        rightOuttakeMotor.setPower(limitedRight);
-
-        lastLeftShooterPowerCommand = limitedLeft;
-        lastRightShooterPowerCommand = limitedRight;
+    private void startShooter() {
+        leftOuttakeMotor.setPower(SHOOTER_SPIN_POWER);
+        rightOuttakeMotor.setPower(SHOOTER_SPIN_POWER);
+        shooterSpinning = true;
+        currentShooterPowerCommand = SHOOTER_SPIN_POWER;
     }
 
-    private void enableShooterPid() {
-        targetShooterRpmBase = SHOOTER_TARGET_RPM;
-        targetLeftShooterRpm = SHOOTER_TARGET_RPM;
-        targetRightShooterRpm = SHOOTER_TARGET_RPM;
-
-        if (!shooterPidEnabled) {
-            shooterPidEnabled = true;
-            shooterTimer.reset();
-            shooterRampTimer.reset();
-            lastLeftShooterPosition = leftOuttakeMotor.getCurrentPosition();
-            lastRightShooterPosition = rightOuttakeMotor.getCurrentPosition();
-            filteredLeftShooterRpm = 0.0;
-            filteredRightShooterRpm = 0.0;
-            leftShooterPid.reset();
-            rightShooterPid.reset();
-        }
-    }
-
-    private void stopShooterPid() {
-        if (shooterPidEnabled) {
-            shooterPidEnabled = false;
-            leftOuttakeMotor.setPower(0.0);
-            rightOuttakeMotor.setPower(0.0);
-            leftShooterPid.reset();
-            rightShooterPid.reset();
-        }
-        targetShooterRpmBase = 0.0;
-        targetLeftShooterRpm = 0.0;
-        targetRightShooterRpm = 0.0;
-        lastLeftShooterPowerCommand = 0.0;
-        lastRightShooterPowerCommand = 0.0;
-    }
-
-    private double limitShooterPower(double requestedPower) {
-        double clipped = Range.clip(requestedPower, 0.0, SHOOTER_POWER_MAX);
-        if (shooterRampTimer.seconds() < SHOOTER_RAMP_DURATION_S) {
-            clipped = Math.min(clipped, SHOOTER_RAMP_MAX_POWER);
-        }
-        return clipped;
-    }
-
-    private double ticksToRpm(double deltaTicks, double dtSeconds) {
-        double revs = deltaTicks / SHOOTER_COUNTS_PER_REV;
-        return (revs / dtSeconds) * 60.0;
-    }
-
-    private double applyFilter(double previous, double raw, double alpha) {
-        if (Double.isNaN(raw) || Double.isInfinite(raw)) {
-            return previous;
-        }
-        return previous + alpha * (raw - previous);
+    private void stopShooter() {
+        leftOuttakeMotor.setPower(0.0);
+        rightOuttakeMotor.setPower(0.0);
+        shooterSpinning = false;
+        currentShooterPowerCommand = 0.0;
     }
 
     private void cancelSequence() {
@@ -445,7 +324,7 @@ public class ShootingSequenceController {
 
         outtakeServo.setPosition(OUTTAKE_DOWN_POS);
         blockerServo.setPosition(BLOCKER_UP_POS);
-        stopShooterPid();
+        stopShooter();
         intakeMotor.setPower(0.0);
         frontIntakeMotor.setPower(0.0);
         intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
@@ -459,161 +338,12 @@ public class ShootingSequenceController {
     public ShootingState getShootingState() { return shootingState; }
     public int getShotsFired() { return shotsFired; }
     public boolean isIntakeOn() { return intakeOn; }
-    public boolean isShooterPidEnabled() { return shooterPidEnabled; }
 
-    public double getTargetShooterRpm() { return targetShooterRpmBase; }
-    public double getLeftTargetShooterRpm() { return targetLeftShooterRpm; }
-    public double getRightTargetShooterRpm() { return targetRightShooterRpm; }
-    public double getLeftShooterRpm() { return filteredLeftShooterRpm; }
-    public double getRightShooterRpm() { return filteredRightShooterRpm; }
-    public double getLeftShooterPowerCommand() { return lastLeftShooterPowerCommand; }
-    public double getRightShooterPowerCommand() { return lastRightShooterPowerCommand; }
-
-    public ShooterPidTelemetry getLeftShooterPidTelemetry() {
-        return leftShooterPid.getLastTelemetry();
+    public boolean isShooterSpinning() {
+        return shooterSpinning;
     }
 
-    public ShooterPidTelemetry getRightShooterPidTelemetry() {
-        return rightShooterPid.getLastTelemetry();
-    }
-
-    private static class ShooterPidController {
-        private final double kP;
-        private final double kI;
-        private final double kD;
-        private final double integralLimit;
-
-        private double integral;
-        private double previousError;
-        private boolean firstUpdate = true;
-
-        private double lastTargetRpm;
-        private double lastMeasuredRpm;
-        private double lastErrorRpm;
-        private double lastDerivative;
-        private double lastPTerm;
-        private double lastITerm;
-        private double lastDTerm;
-        private double lastOutput;
-
-        ShooterPidController(double kP, double kI, double kD, double integralLimit) {
-            this.kP = kP;
-            this.kI = kI;
-            this.kD = kD;
-            this.integralLimit = Math.abs(integralLimit);
-            clearTelemetry();
-        }
-
-        double update(double targetRpm, double measuredRpm, double dtSeconds) {
-            if (targetRpm <= 0.0) {
-                reset();
-                lastMeasuredRpm = measuredRpm;
-                return 0.0;
-            }
-
-            double safeDt = dtSeconds > 0.0 ? dtSeconds : 1e-3;
-            double error = targetRpm - measuredRpm;
-
-            integral += error * safeDt;
-            integral = clipIntegral(integral);
-
-            double derivative;
-            if (firstUpdate) {
-                derivative = 0.0;
-                firstUpdate = false;
-            } else {
-                derivative = (error - previousError) / safeDt;
-            }
-
-            previousError = error;
-
-            double pTerm = kP * error;
-            double iTerm = kI * integral;
-            double dTerm = kD * derivative;
-
-            double output = Range.clip(pTerm + iTerm + dTerm, 0.0, 1.0);
-
-            lastTargetRpm = targetRpm;
-            lastMeasuredRpm = measuredRpm;
-            lastErrorRpm = error;
-            lastDerivative = derivative;
-            lastPTerm = pTerm;
-            lastITerm = iTerm;
-            lastDTerm = dTerm;
-            lastOutput = output;
-
-            return output;
-        }
-
-        void reset() {
-            integral = 0.0;
-            previousError = 0.0;
-            firstUpdate = true;
-            clearTelemetry();
-        }
-
-        private double clipIntegral(double value) {
-            if (integralLimit <= 0.0) {
-                return value;
-            }
-            return Math.max(-integralLimit, Math.min(integralLimit, value));
-        }
-
-        private void clearTelemetry() {
-            lastTargetRpm = 0.0;
-            lastMeasuredRpm = 0.0;
-            lastErrorRpm = 0.0;
-            lastDerivative = 0.0;
-            lastPTerm = 0.0;
-            lastITerm = 0.0;
-            lastDTerm = 0.0;
-            lastOutput = 0.0;
-        }
-
-        ShooterPidTelemetry getLastTelemetry() {
-            return new ShooterPidTelemetry(
-                    lastTargetRpm,
-                    lastMeasuredRpm,
-                    lastErrorRpm,
-                    lastPTerm,
-                    lastITerm,
-                    lastDTerm,
-                    lastDerivative,
-                    lastOutput,
-                    integral
-            );
-        }
-    }
-
-    public static class ShooterPidTelemetry {
-        public final double targetRpm;
-        public final double measuredRpm;
-        public final double errorRpm;
-        public final double pTerm;
-        public final double iTerm;
-        public final double dTerm;
-        public final double derivativeRpmPerSec;
-        public final double output;
-        public final double integralState;
-
-        ShooterPidTelemetry(double targetRpm,
-                            double measuredRpm,
-                            double errorRpm,
-                            double pTerm,
-                            double iTerm,
-                            double dTerm,
-                            double derivativeRpmPerSec,
-                            double output,
-                            double integralState) {
-            this.targetRpm = targetRpm;
-            this.measuredRpm = measuredRpm;
-            this.errorRpm = errorRpm;
-            this.pTerm = pTerm;
-            this.iTerm = iTerm;
-            this.dTerm = dTerm;
-            this.derivativeRpmPerSec = derivativeRpmPerSec;
-            this.output = output;
-            this.integralState = integralState;
-        }
+    public double getShooterPowerCommand() {
+        return currentShooterPowerCommand;
     }
 }

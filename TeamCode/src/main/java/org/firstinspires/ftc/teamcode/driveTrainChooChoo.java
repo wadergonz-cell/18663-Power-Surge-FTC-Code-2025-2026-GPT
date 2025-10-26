@@ -41,6 +41,7 @@ public class driveTrainChooChoo {
     private final TurnAssistPid turnAssistPid = new TurnAssistPid();
     private final ElapsedTime turnAssistTimer = new ElapsedTime();
     private double lastTurnAssistOutput = 0.0;
+    private FieldCentricDebug lastFieldCentricDebug = new FieldCentricDebug();
 
     public driveTrainChooChoo(robotHardware RobotHardware) {
         this.RobotHardware = RobotHardware;
@@ -78,8 +79,18 @@ public class driveTrainChooChoo {
         setTurnAssist(override);
     }
 
-    /** Call every loop from TeleOp. */
+    /** Call every loop from TeleOp (field-centric by default). */
     public void driveCode(Gamepad gamepad1) {
+        drive(gamepad1, true);
+    }
+
+    /** Explicit field-centric helper to make intent clear from TeleOp code. */
+    public void driveFieldCentric(Gamepad gamepad1) {
+        drive(gamepad1, true);
+    }
+
+    /** Allow future expansion for robot-centric or other drive modes. */
+    public void drive(Gamepad gamepad1, boolean fieldCentric) {
         double y  = -gamepad1.left_stick_y; // up is negative on stick
         double x  =  gamepad1.left_stick_x;
         double rxDriver = -gamepad1.right_stick_x; // FIXED: inverted turn
@@ -101,13 +112,20 @@ public class driveTrainChooChoo {
         double slowRight = -0.20 * gamepad1.right_trigger;
         double slowTurn  = slowLeft + slowRight;
 
-        double botHeading = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
-        double sinHeading = Math.sin(botHeading);
-        double cosHeading = Math.cos(botHeading);
+        double rotX;
+        double rotY;
+        double headingRad = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
+        if (fieldCentric) {
+            double sinHeading = Math.sin(headingRad);
+            double cosHeading = Math.cos(headingRad);
 
-        // Field-centric transform (rotate driver input by the robot heading)
-        double rotX = (y * sinHeading) + (x * cosHeading);
-        double rotY = (y * cosHeading) - (x * sinHeading);
+            // Field-centric transform (rotate driver input by the robot heading)
+            rotX = (y * sinHeading) + (x * cosHeading);
+            rotY = (y * cosHeading) - (x * sinHeading);
+        } else {
+            rotX = x;
+            rotY = y;
+        }
 
         rotX *= 1.1; // imperfect strafe compensation
 
@@ -129,6 +147,25 @@ public class driveTrainChooChoo {
         frontRightMotor.setPower(frontRightPower);
         backRightMotor.setPower(backRightPower);
 
+        FieldCentricDebug debug = new FieldCentricDebug();
+        debug.fieldCentricEnabled = fieldCentric;
+        debug.rawX = x;
+        debug.rawY = y;
+        debug.rawTurn = rxDriver;
+        debug.turnAssistActive = (turnAssistErrorRad != null);
+        debug.turnAssistOutput = lastTurnAssistOutput;
+        debug.appliedTurn = rx;
+        debug.slowTurn = slowTurn;
+        debug.headingRad = headingRad;
+        debug.headingDeg = Math.toDegrees(headingRad);
+        debug.rotatedX = rotX;
+        debug.rotatedY = rotY;
+        debug.frontLeftPower = frontLeftPower;
+        debug.frontRightPower = frontRightPower;
+        debug.backLeftPower = backLeftPower;
+        debug.backRightPower = backRightPower;
+        lastFieldCentricDebug = debug;
+
         if (gamepad1.back) {
             RobotHardware.imu.resetYaw();
         }
@@ -147,6 +184,11 @@ public class driveTrainChooChoo {
     /** Whether the PID-based turn assist is active. */
     public boolean isTurnAssistActive() {
         return turnAssistErrorRad != null;
+    }
+
+    /** Latest field-centric debug snapshot for telemetry. */
+    public FieldCentricDebug getFieldCentricDebug() {
+        return lastFieldCentricDebug;
     }
 
     /** Encapsulates the most recent PID terms for telemetry. */
@@ -273,5 +315,25 @@ public class driveTrainChooChoo {
             lastDtSeconds = 0.0;
             lastOutput = 0.0;
         }
+    }
+
+    /** Captures the driver inputs and heading used for the last field-centric calculation. */
+    public static class FieldCentricDebug {
+        public boolean fieldCentricEnabled;
+        public double rawX;
+        public double rawY;
+        public double rawTurn;
+        public boolean turnAssistActive;
+        public double turnAssistOutput;
+        public double appliedTurn;
+        public double slowTurn;
+        public double headingRad;
+        public double headingDeg;
+        public double rotatedX;
+        public double rotatedY;
+        public double frontLeftPower;
+        public double frontRightPower;
+        public double backLeftPower;
+        public double backRightPower;
     }
 }
