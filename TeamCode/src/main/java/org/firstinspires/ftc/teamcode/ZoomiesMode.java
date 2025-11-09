@@ -6,7 +6,7 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 /**
  * Basic TeleOp with shooting sequence state machine.
- * - Drive: field-centric with left stick
+ * - Drive: robot-centric with left stick
  * - A/Y/X buttons: Shooting sequence (no vision auto-aim)
  */
 @TeleOp(name = "ZoomiesMode", group = "TeleOp")
@@ -53,7 +53,7 @@ public class ZoomiesMode extends LinearOpMode {
             );
 
             // Drive
-            driveTrainChooChoo.driveFieldCentric(gamepad1);
+            driveTrainChooChoo.driveRobotCentric(gamepad1);
             theForbiddenButtons.driveOnlyInputs(gamepad1);
 
             // Shooting sequence controller
@@ -67,14 +67,10 @@ public class ZoomiesMode extends LinearOpMode {
 
             // Telemetry
             telemetry.addLine("=== DRIVE ===");
-            telemetry.addData("IMU Heading", "%.1f°",
-                    RobotHardware.imu.getRobotYawPitchRollAngles().getYaw(
-                            org.firstinspires.ftc.robotcore.external.navigation.AngleUnit.DEGREES));
             driveTrainChooChoo.FieldCentricDebug debug = driveTrainChooChoo.getFieldCentricDebug();
-            telemetry.addData("Field Centric", debug.fieldCentricEnabled);
+            telemetry.addData("Drive Mode", "Robot-Centric");
             telemetry.addData("Raw XY/Turn", "%.2f %.2f | %.2f", debug.rawX, debug.rawY, debug.rawTurn);
             telemetry.addData("Rot XY", "%.2f %.2f", debug.rotatedX, debug.rotatedY);
-            telemetry.addData("Heading", "%.1f°", debug.headingDeg);
             telemetry.addData("Turn Assist", "%s | out=%.2f | applied=%.2f | slow=%.2f",
                     debug.turnAssistActive ? "ON" : "OFF",
                     debug.turnAssistOutput,
