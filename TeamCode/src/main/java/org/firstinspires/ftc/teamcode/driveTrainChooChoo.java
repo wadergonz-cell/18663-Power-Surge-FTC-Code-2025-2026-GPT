@@ -3,11 +3,13 @@ package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Gamepad;
+import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import com.qualcomm.robotcore.util.Range;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 
 /**
- * Mecanum drivetrain with robot-centric drive
+ * Mecanum drivetrain with field-centric drive (using IMU)
  * and optional turn override (for auto-aim).
  */
 public class driveTrainChooChoo {
@@ -19,6 +21,14 @@ public class driveTrainChooChoo {
     private final DcMotor frontRightMotor;
     private final DcMotor backRightMotor;
     private final DcMotor backLeftMotor;
+
+    // IMU
+    private final IMU imu;
+
+    private static final double JOYSTICK_DEADBAND = 0.05;
+    private static final double ROTATIONAL_DEADBAND = 0.03;
+    private static final double POST_ROTATION_DEADBAND = 0.02;
+    private static final double TRIGGER_DEADBAND = 0.05;
 
     // === Turn assist PID (tune these gains on-field) ===
     public static double TURN_ASSIST_KP = 1.0;
@@ -45,6 +55,7 @@ public class driveTrainChooChoo {
         frontRightMotor = RobotHardware.frontRightMotor;
         backRightMotor  = RobotHardware.backRightMotor;
         backLeftMotor   = RobotHardware.backLeftMotor;
+        imu             = RobotHardware.imu;
 
         turnAssistTimer.reset();
     }
@@ -73,21 +84,21 @@ public class driveTrainChooChoo {
         setTurnAssist(override);
     }
 
-    /** Call every loop from TeleOp (robot-centric by default). */
+    /** Call every loop from TeleOp (field-centric by default). */
     public void driveCode(Gamepad gamepad1) {
-        drive(gamepad1);
+        drive(gamepad1, true);
     }
 
-    /** Explicit robot-centric helper to make intent clear from TeleOp code. */
-    public void driveRobotCentric(Gamepad gamepad1) {
-        drive(gamepad1);
+    /** Explicit field-centric helper to make intent clear from TeleOp code. */
+    public void driveFieldCentric(Gamepad gamepad1) {
+        drive(gamepad1, true);
     }
 
-    /** Core robot-centric drive implementation. */
-    private void drive(Gamepad gamepad1) {
-        double y  = gamepad1.left_stick_y; // up is negative on stick
-        double x  = -gamepad1.left_stick_x;
-        double rxDriver = -gamepad1.right_stick_x; // FIXED: inverted turn
+    /** Allow future expansion for robot-centric or other drive modes. */
+    public void drive(Gamepad gamepad1, boolean fieldCentric) {
+        double y  = applyDeadband(gamepad1.left_stick_y, JOYSTICK_DEADBAND); // up is negative on stick
+        double x  = applyDeadband(-gamepad1.left_stick_x, JOYSTICK_DEADBAND);
+        double rxDriver = applyDeadband(-gamepad1.right_stick_x, ROTATIONAL_DEADBAND); // FIXED: inverted turn
         double rx;
 
         if (turnAssistErrorRad != null) {
@@ -101,15 +112,32 @@ public class driveTrainChooChoo {
             rx = rxDriver;
         }
 
+        rx = applyDeadband(rx, ROTATIONAL_DEADBAND);
+
         // Slow turn with triggers
-        double slowLeft  =  0.20 * gamepad1.left_trigger;
-        double slowRight = -0.20 * gamepad1.right_trigger;
+        double slowLeft  =  0.20 * applyDeadband(gamepad1.left_trigger, TRIGGER_DEADBAND);
+        double slowRight = -0.20 * applyDeadband(gamepad1.right_trigger, TRIGGER_DEADBAND);
         double slowTurn  = slowLeft + slowRight;
 
-        double rotX = x;
-        double rotY = y;
+        double rotX;
+        double rotY;
+        double headingRad = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
+        if (fieldCentric) {
+            double sinHeading = Math.sin(headingRad);
+            double cosHeading = Math.cos(headingRad);
 
-        rotX *= 1.1; // imperfect strafe compensation
+            // Field-centric transform (rotate driver command from field frame into robot frame)
+            rotX = (x * cosHeading) + (y * sinHeading);
+            rotY = (-x * sinHeading) + (y * cosHeading);
+        } else {
+            rotX = x;
+            rotY = y;
+        }
+
+        rotX = applyDeadband(rotX * 1.1, POST_ROTATION_DEADBAND); // imperfect strafe compensation
+        rotY = applyDeadband(rotY, POST_ROTATION_DEADBAND);
+
+        boolean idleCommand = (rotX == 0.0) && (rotY == 0.0) && (rx == 0.0) && (slowTurn == 0.0);
 
         double denominator = Math.max(Math.abs(rotY) + Math.abs(rotX) + Math.abs(rx), 1.0);
 
@@ -124,13 +152,20 @@ public class driveTrainChooChoo {
         frontRightPower -= slowTurn;
         backRightPower  -= slowTurn;
 
-        frontLeftMotor.setPower(frontLeftPower);
-        backLeftMotor.setPower(backLeftPower);
-        frontRightMotor.setPower(frontRightPower);
-        backRightMotor.setPower(backRightPower);
+        if (idleCommand) {
+            frontLeftMotor.setPower(0.0);
+            backLeftMotor.setPower(0.0);
+            frontRightMotor.setPower(0.0);
+            backRightMotor.setPower(0.0);
+        } else {
+            frontLeftMotor.setPower(frontLeftPower);
+            backLeftMotor.setPower(backLeftPower);
+            frontRightMotor.setPower(frontRightPower);
+            backRightMotor.setPower(backRightPower);
+        }
 
         FieldCentricDebug debug = new FieldCentricDebug();
-        debug.fieldCentricEnabled = false;
+        debug.fieldCentricEnabled = fieldCentric;
         debug.rawX = x;
         debug.rawY = y;
         debug.rawTurn = rxDriver;
@@ -138,8 +173,8 @@ public class driveTrainChooChoo {
         debug.turnAssistOutput = lastTurnAssistOutput;
         debug.appliedTurn = rx;
         debug.slowTurn = slowTurn;
-        debug.headingRad = 0.0;
-        debug.headingDeg = 0.0;
+        debug.headingRad = headingRad;
+        debug.headingDeg = Math.toDegrees(headingRad);
         debug.rotatedX = rotX;
         debug.rotatedY = rotY;
         debug.frontLeftPower = frontLeftPower;
@@ -147,6 +182,10 @@ public class driveTrainChooChoo {
         debug.backLeftPower = backLeftPower;
         debug.backRightPower = backRightPower;
         lastFieldCentricDebug = debug;
+
+        if (gamepad1.back) {
+            RobotHardware.imu.resetYaw();
+        }
     }
 
     /** Last commanded PID output for telemetry. */
@@ -295,7 +334,7 @@ public class driveTrainChooChoo {
         }
     }
 
-    /** Captures the driver inputs used for the last drive calculation. */
+    /** Captures the driver inputs and heading used for the last field-centric calculation. */
     public static class FieldCentricDebug {
         public boolean fieldCentricEnabled;
         public double rawX;
@@ -313,5 +352,9 @@ public class driveTrainChooChoo {
         public double frontRightPower;
         public double backLeftPower;
         public double backRightPower;
+    }
+
+    private static double applyDeadband(double value, double deadband) {
+        return (Math.abs(value) < deadband) ? 0.0 : value;
     }
 }

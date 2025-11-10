@@ -8,7 +8,7 @@ import com.qualcomm.robotcore.util.Range;
 
 /**
  * Red Alliance TeleOp with shooting sequence and auto-aim.
- * - Drive: robot-centric with left stick
+ * - Drive: field-centric with left stick
  * - A/Y/X buttons: Shooting sequence (uses AprilTag distance for RPM)
  * - B button: Toggle intake
  * - Left bumper: Optional auto-aim towards Tag ID 24
@@ -113,7 +113,7 @@ public class ZoomiesMode_RedAlliance extends LinearOpMode {
             autoAimTracking = autoAimTracking && driveTrainChooChoo.isTurnAssistActive();
 
             // Drive
-            driveTrainChooChoo.driveRobotCentric(gamepad1);
+            driveTrainChooChoo.driveCode(gamepad1);
             theForbiddenButtons.driveOnlyInputs(gamepad1);
 
             // Shooting sequence controller (uses AprilTag distance)
@@ -127,6 +127,9 @@ public class ZoomiesMode_RedAlliance extends LinearOpMode {
 
             // Telemetry
             telemetry.addLine("=== DRIVE ===");
+            telemetry.addData("IMU Heading", "%.1f°",
+                    RobotHardware.imu.getRobotYawPitchRollAngles().getYaw(
+                            org.firstinspires.ftc.robotcore.external.navigation.AngleUnit.DEGREES));
             telemetry.addData("Auto-Aim Enabled", autoAimEnabled);
             telemetry.addData("Auto-Aim Tracking", autoAimTracking);
             telemetry.addData("Auto-Aim Error (deg)", "%.2f", Math.toDegrees(filteredAimErrorRad));
@@ -141,9 +144,10 @@ public class ZoomiesMode_RedAlliance extends LinearOpMode {
                     turnPid.dTerm,
                     turnPid.integralState);
             driveTrainChooChoo.FieldCentricDebug debug = driveTrainChooChoo.getFieldCentricDebug();
-            telemetry.addData("Drive Mode", "Robot-Centric");
+            telemetry.addData("Field Centric", debug.fieldCentricEnabled);
             telemetry.addData("Raw XY/Turn", "%.2f %.2f | %.2f", debug.rawX, debug.rawY, debug.rawTurn);
             telemetry.addData("Rot XY", "%.2f %.2f", debug.rotatedX, debug.rotatedY);
+            telemetry.addData("Heading", "%.1f°", debug.headingDeg);
             telemetry.addData("Turn Assist", "%s | out=%.2f | applied=%.2f | slow=%.2f",
                     debug.turnAssistActive ? "ON" : "OFF",
                     debug.turnAssistOutput,
@@ -161,8 +165,15 @@ public class ZoomiesMode_RedAlliance extends LinearOpMode {
             telemetry.addData("State", shootingSequence.getShootingState());
             telemetry.addData("Shots Fired", shootingSequence.getShotsFired());
             telemetry.addData("Shooter Spinning", shootingSequence.isShooterSpinning());
-            telemetry.addData("Shooter Target Power", "%.2f", ShootingSequenceController.SHOOTER_SPIN_POWER);
-            telemetry.addData("Commanded Power", "%.2f", shootingSequence.getShooterPowerCommand());
+            telemetry.addData("Shooter Target RPM", "%.0f / %.0f",
+                    shootingSequence.getLeftShooterTargetRpm(),
+                    shootingSequence.getRightShooterTargetRpm());
+            telemetry.addData("Shooter Measured RPM", "%.0f / %.0f",
+                    shootingSequence.getLeftShooterMeasuredRpm(),
+                    shootingSequence.getRightShooterMeasuredRpm());
+            telemetry.addData("Shooter Commanded Power", "%.2f / %.2f",
+                    shootingSequence.getLeftShooterPowerCommand(),
+                    shootingSequence.getRightShooterPowerCommand());
             telemetry.addData("Motor Power L/R", "%.2f / %.2f",
                     RobotHardware.leftOuttakeMotor.getPower(),
                     RobotHardware.rightOuttakeMotor.getPower());
