@@ -87,6 +87,9 @@ public class ShootingSequenceController {
 
         this.intakeMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         this.intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+
+        // Ensure the servo starts in the safe up position when this controller is created.
+        this.outtakeServo.setPosition(OUTTAKE_UP_POS);
     }
 
     /**
@@ -199,30 +202,19 @@ public class ShootingSequenceController {
         // Each step has a duration; adjust timing as needed
         switch (currentShootingStep) {
             case 0:
-                // Step 1: Retract intake by the configured reverse rotation at 50% power
-                if (!waitingForIntakeRotation) {
-                    intakeStartPosition = intakeMotor.getCurrentPosition();
-                    intakeMoveTicks = INTAKE_REVERSE_TICKS;
-                    int targetPosition = intakeStartPosition - intakeMoveTicks;
-                    intakeMotor.setTargetPosition(targetPosition);
-                    intakeMotor.setMode(DcMotor.RunMode.RUN_TO_POSITION);
-                    intakeMotor.setPower(INTAKE_ROTATION_SPEED);
-                    waitingForIntakeRotation = true;
-                } else if (!intakeMotor.isBusy()
-                        || Math.abs(intakeMotor.getCurrentPosition() - intakeStartPosition) >= intakeMoveTicks) {
-                    intakeMotor.setPower(0.0);
-                    intakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-                    waitingForIntakeRotation = false;
-                    intakeMoveTicks = 0;
+                // Step 1: Lower outtake servo to load the ring
+                if (elapsed < 0.2) {
+                    outtakeServo.setPosition(OUTTAKE_DOWN_POS);
+                } else {
                     currentShootingStep++;
                     stepTimer.reset();
                 }
                 break;
 
             case 1:
-                // Step 2: Hold shooter power before firing
-                if (elapsed < 0.1) {
-                    spinUpMotors();
+                // Step 2: Lower blocker servo to clear the ring
+                if (elapsed < 0.2) {
+                    blockerServo.setPosition(BLOCKER_DOWN_POS);
                 } else {
                     currentShootingStep++;
                     stepTimer.reset();
