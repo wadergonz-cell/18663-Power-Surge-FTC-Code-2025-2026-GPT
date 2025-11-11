@@ -17,6 +17,10 @@ public class ZoomiesMode extends LinearOpMode {
     private theForbiddenButtons theForbiddenButtons;
     private ShootingSequenceController shootingSequence;
     private AprilTagHelper vision;
+    private boolean cameraTrackingEnabled = false;
+    private boolean leftBumperLatch = false;
+    private boolean prevDpadUp = false;
+    private boolean prevDpadDown = false;
 
     @Override
     public void runOpMode() throws InterruptedException {
@@ -31,6 +35,17 @@ public class ZoomiesMode extends LinearOpMode {
         telemetry.addLine("ZoomiesMode Ready");
         telemetry.addLine("A: Shoot sequence  |  Y: Add shot  |  X: Cancel");
         telemetry.update();
+
+        while (!isStarted() && !isStopRequested()) {
+            vision.update();
+            Integer startTag = AprilTagHelper.getStartZoneTagId();
+            telemetry.addLine(startTag != null
+                    ? "Start tag 🎯 - " + startTag
+                    : "Start tag 🎯 - scanning...");
+            telemetry.update();
+            sleep(50);
+            telemetry.clearAll();
+        }
 
         waitForStart();
         if (isStopRequested()) {
@@ -52,8 +67,32 @@ public class ZoomiesMode extends LinearOpMode {
                     vision.getYawErrorRad()
             );
 
+            boolean leftBumper = gamepad1.left_bumper;
+            if (leftBumper && !leftBumperLatch) {
+                cameraTrackingEnabled = !cameraTrackingEnabled;
+            }
+            leftBumperLatch = leftBumper;
+
+            boolean dpadUp = gamepad1.dpad_up;
+            boolean dpadDown = gamepad1.dpad_down;
+            if (dpadUp && !prevDpadUp) {
+                shootingSequence.setLongRangeMode(true);
+            }
+            if (dpadDown && !prevDpadDown) {
+                // Down toggles off
+                shootingSequence.setLongRangeMode(false);
+            }
+            prevDpadUp = dpadUp;
+            prevDpadDown = dpadDown;
+
+            Double turnAssist = null;
+            if (cameraTrackingEnabled && tagReport.hasTag) {
+                turnAssist = tagReport.yawCorrectedRad;
+            }
+            driveTrainChooChoo.setTurnAssist(turnAssist);
+
             // Drive
-            driveTrainChooChoo.driveCode(gamepad1);
+            driveTrainChooChoo.driveFieldCentric(gamepad1);
             theForbiddenButtons.driveOnlyInputs(gamepad1);
 
             // Shooting sequence controller
@@ -65,54 +104,92 @@ public class ZoomiesMode extends LinearOpMode {
                     tagReport
             );
 
-            // Telemetry
-            telemetry.addLine("=== DRIVE ===");
-            telemetry.addData("IMU Heading", "%.1f°",
-                    RobotHardware.imu.getRobotYawPitchRollAngles().getYaw(
-                            org.firstinspires.ftc.robotcore.external.navigation.AngleUnit.DEGREES));
-            driveTrainChooChoo.FieldCentricDebug debug = driveTrainChooChoo.getFieldCentricDebug();
-            telemetry.addData("Field Centric", debug.fieldCentricEnabled);
-            telemetry.addData("Raw XY/Turn", "%.2f %.2f | %.2f", debug.rawX, debug.rawY, debug.rawTurn);
-            telemetry.addData("Rot XY", "%.2f %.2f", debug.rotatedX, debug.rotatedY);
-            telemetry.addData("Heading", "%.1f°", debug.headingDeg);
-            telemetry.addData("Turn Assist", "%s | out=%.2f | applied=%.2f | slow=%.2f",
-                    debug.turnAssistActive ? "ON" : "OFF",
-                    debug.turnAssistOutput,
-                    debug.appliedTurn,
-                    debug.slowTurn);
-            telemetry.addData("Motor Power", "FL %.2f | FR %.2f | BL %.2f | BR %.2f",
-                    debug.frontLeftPower,
-                    debug.frontRightPower,
-                    debug.backLeftPower,
-                    debug.backRightPower);
+            telemetry.addLine(String.format("Camera tracking 📸 - %s %s",
+                    boolEmoji(cameraTrackingEnabled),
+                    boolEmoji(tagReport.hasTag)));
+            telemetry.addLine(startZoneStatusLine());
 
-            telemetry.addLine("\n=== SHOOTING ===");
-            telemetry.addData("A Clicks", shootingSequence.getAClickCount());
-            telemetry.addData("Y Count (shots)", shootingSequence.getYClickCount());
-            telemetry.addData("State", shootingSequence.getShootingState());
-            telemetry.addData("Shots Fired", shootingSequence.getShotsFired());
-            telemetry.addData("Shooter Spinning", shootingSequence.isShooterSpinning());
-            telemetry.addData("Shooter Target RPM", "%.0f / %.0f",
-                    shootingSequence.getLeftShooterTargetRpm(),
-                    shootingSequence.getRightShooterTargetRpm());
-            telemetry.addData("Shooter Measured RPM", "%.0f / %.0f",
-                    shootingSequence.getLeftShooterMeasuredRpm(),
-                    shootingSequence.getRightShooterMeasuredRpm());
-            telemetry.addData("Shooter Commanded Power", "%.2f / %.2f",
-                    shootingSequence.getLeftShooterPowerCommand(),
-                    shootingSequence.getRightShooterPowerCommand());
-            telemetry.addData("Motor Power L/R", "%.2f / %.2f",
-                    RobotHardware.leftOuttakeMotor.getPower(),
-                    RobotHardware.rightOuttakeMotor.getPower());
+            String spinLine = String.format("Spin-up state 😵‍💫 - L%s R%s",
+                    rpmEmoji(shootingSequence.getShooterTargetRpm(), shootingSequence.getLeftShooterRpm()),
+                    rpmEmoji(shootingSequence.getShooterTargetRpm(), shootingSequence.getRightShooterRpm()));
+            if (shootingSequence.isLongRangeModeActive()) {
+                spinLine += " LR🟣";
+            }
+            telemetry.addLine(spinLine);
 
-            telemetry.addLine("\n=== VISION ===");
-            telemetry.addData("Has Tag", tagReport.hasTag);
-            telemetry.addData("Tag ID", tagReport.tagId);
-            telemetry.addData("Distance (in)", "%.1f", tagReport.horizontalRangeIn);
+            telemetry.addLine(yCountLine(shootingSequence.getYClickCount()));
+
+            Integer startZoneTag = AprilTagHelper.getStartZoneTagId();
+            telemetry.addLine(startZoneTag != null
+                    ? "Start tag 🎯 - " + startZoneTag
+                    : "Start tag 🎯 - scanning...");
+
+            telemetry.addLine("");
+            telemetry.addLine("");
+            telemetry.addLine("");
+
+            if (tagReport.hasTag) {
+                telemetry.addLine(String.format("April tag distance ↔️ - %d inches",
+                        Math.round(tagReport.horizontalRangeIn)));
+            } else {
+                telemetry.addLine("April tag distance ↔️ - 🔴 (not found)");
+            }
+
+            telemetry.addLine(String.format("IMU ⬆ %.1f degrees", driveTrainChooChoo.getHeadingDegrees()));
 
             telemetry.update();
         }
 
         vision.stop();
+    }
+
+    private String boolEmoji(boolean condition) {
+        return condition ? "🟢" : "🔴";
+    }
+
+    private String yCountLine(int yCount) {
+        if (yCount <= 0) {
+            return "Y count ⚪ - none";
+        }
+        StringBuilder builder = new StringBuilder("Y count ⚪ - ");
+        for (int i = 0; i < yCount; i++) {
+            if (i > 0) {
+                builder.append(' ');
+            }
+            builder.append("⚪");
+        }
+        return builder.toString();
+    }
+
+    private String rpmEmoji(double targetRpm, double currentRpm) {
+        if (targetRpm <= 0.0) {
+            return "🔴";
+        }
+
+        double error = Math.abs(targetRpm - currentRpm);
+        if (error <= RobotConstants.SHOOTER_RPM_GREEN_THRESHOLD) {
+            return "🟢";
+        }
+        if (error <= RobotConstants.SHOOTER_RPM_YELLOW_THRESHOLD) {
+            return "🟡";
+        }
+        return "🔴";
+    }
+
+    private String startZoneStatusLine() {
+        Integer startTag = AprilTagHelper.getStartZoneTagId();
+        if (startTag == null) {
+            return "⚫ ⚫ ⚫";
+        }
+        switch (startTag) {
+            case 21:
+                return "🟢 🟣 🟣";
+            case 22:
+                return "🟣 🟢 🟣";
+            case 23:
+                return "🟣 🟣 🟢";
+            default:
+                return "🟣 🟣 🟢";
+        }
     }
 }

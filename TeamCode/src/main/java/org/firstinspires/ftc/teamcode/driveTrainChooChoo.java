@@ -24,11 +24,15 @@ public class driveTrainChooChoo {
 
     // IMU
     private final IMU imu;
-
-    private static final double JOYSTICK_DEADBAND = 0.05;
-    private static final double ROTATIONAL_DEADBAND = 0.03;
-    private static final double POST_ROTATION_DEADBAND = 0.02;
-    private static final double TRIGGER_DEADBAND = 0.05;
+    private final ElapsedTime imuUpdateTimer = new ElapsedTime();
+    private double cachedHeadingRad = 0.0;
+    private boolean headingInitialized = false;
+    private boolean slowModeLast = false;
+    private boolean holdPositionActive = false;
+    private int holdFrontLeftTarget = 0;
+    private int holdFrontRightTarget = 0;
+    private int holdBackLeftTarget = 0;
+    private int holdBackRightTarget = 0;
 
     // === Turn assist PID (tune these gains on-field) ===
     public static double TURN_ASSIST_KP = 1.0;
@@ -58,6 +62,7 @@ public class driveTrainChooChoo {
         imu             = RobotHardware.imu;
 
         turnAssistTimer.reset();
+        imuUpdateTimer.reset();
     }
 
     /** Allow external code to assist turn (e.g., AprilTag PID). */
@@ -96,9 +101,22 @@ public class driveTrainChooChoo {
 
     /** Allow future expansion for robot-centric or other drive modes. */
     public void drive(Gamepad gamepad1, boolean fieldCentric) {
-        double y  = applyDeadband(gamepad1.left_stick_y, JOYSTICK_DEADBAND); // up is negative on stick
-        double x  = applyDeadband(-gamepad1.left_stick_x, JOYSTICK_DEADBAND);
-        double rxDriver = applyDeadband(-gamepad1.right_stick_x, ROTATIONAL_DEADBAND); // FIXED: inverted turn
+        boolean slowMode = gamepad1.right_bumper;
+
+        double translationScale = slowMode
+                ? RobotConstants.SLOW_MODE_TRANSLATION_SCALE
+                : 1.0;
+        double turnScale = slowMode
+                ? RobotConstants.SLOW_MODE_TURN_SCALE
+                : RobotConstants.NORMAL_TURN_SCALE;
+
+        double rawYInput = gamepad1.left_stick_y;
+        double rawXInput = -gamepad1.left_stick_x;
+        double rawTurnInput = -gamepad1.right_stick_x; // FIXED: inverted turn
+
+        double y  = rawYInput * translationScale;
+        double x  = rawXInput * translationScale;
+        double rxDriver = rawTurnInput * turnScale;
         double rx;
 
         if (turnAssistErrorRad != null) {
@@ -112,32 +130,27 @@ public class driveTrainChooChoo {
             rx = rxDriver;
         }
 
-        rx = applyDeadband(rx, ROTATIONAL_DEADBAND);
-
         // Slow turn with triggers
-        double slowLeft  =  0.20 * applyDeadband(gamepad1.left_trigger, TRIGGER_DEADBAND);
-        double slowRight = -0.20 * applyDeadband(gamepad1.right_trigger, TRIGGER_DEADBAND);
+        double slowLeft  =  0.20 * gamepad1.left_trigger;
+        double slowRight = -0.20 * gamepad1.right_trigger;
         double slowTurn  = slowLeft + slowRight;
 
         double rotX;
         double rotY;
-        double headingRad = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
+        double headingRad = getCachedHeadingRad();
         if (fieldCentric) {
             double sinHeading = Math.sin(headingRad);
             double cosHeading = Math.cos(headingRad);
 
-            // Field-centric transform (rotate driver command from field frame into robot frame)
-            rotX = (x * cosHeading) + (y * sinHeading);
-            rotY = (-x * sinHeading) + (y * cosHeading);
+            // Field-centric transform (rotate driver input by the robot heading)
+            rotX = (y * sinHeading) + (x * cosHeading);
+            rotY = (y * cosHeading) - (x * sinHeading);
         } else {
             rotX = x;
             rotY = y;
         }
 
-        rotX = applyDeadband(rotX * 1.1, POST_ROTATION_DEADBAND); // imperfect strafe compensation
-        rotY = applyDeadband(rotY, POST_ROTATION_DEADBAND);
-
-        boolean idleCommand = (rotX == 0.0) && (rotY == 0.0) && (rx == 0.0) && (slowTurn == 0.0);
+        rotX *= 1.1; // imperfect strafe compensation
 
         double denominator = Math.max(Math.abs(rotY) + Math.abs(rotX) + Math.abs(rx), 1.0);
 
@@ -152,12 +165,28 @@ public class driveTrainChooChoo {
         frontRightPower -= slowTurn;
         backRightPower  -= slowTurn;
 
-        if (idleCommand) {
-            frontLeftMotor.setPower(0.0);
-            backLeftMotor.setPower(0.0);
-            frontRightMotor.setPower(0.0);
-            backRightMotor.setPower(0.0);
+        if (slowMode != slowModeLast) {
+            DcMotor.ZeroPowerBehavior behavior = slowMode
+                    ? DcMotor.ZeroPowerBehavior.BRAKE
+                    : DcMotor.ZeroPowerBehavior.FLOAT;
+            frontLeftMotor.setZeroPowerBehavior(behavior);
+            backLeftMotor.setZeroPowerBehavior(behavior);
+            frontRightMotor.setZeroPowerBehavior(behavior);
+            backRightMotor.setZeroPowerBehavior(behavior);
+            slowModeLast = slowMode;
+        }
+
+        boolean driverIdle = slowMode
+                && Math.abs(rawXInput) <= RobotConstants.SLOW_MODE_HOLD_DEADBAND
+                && Math.abs(rawYInput) <= RobotConstants.SLOW_MODE_HOLD_DEADBAND
+                && Math.abs(rawTurnInput) <= RobotConstants.SLOW_MODE_HOLD_DEADBAND
+                && gamepad1.left_trigger <= RobotConstants.SLOW_MODE_HOLD_TRIGGER_DEADBAND
+                && gamepad1.right_trigger <= RobotConstants.SLOW_MODE_HOLD_TRIGGER_DEADBAND;
+
+        if (driverIdle) {
+            engageHoldPosition();
         } else {
+            holdPositionActive = false;
             frontLeftMotor.setPower(frontLeftPower);
             backLeftMotor.setPower(backLeftPower);
             frontRightMotor.setPower(frontRightPower);
@@ -166,15 +195,18 @@ public class driveTrainChooChoo {
 
         FieldCentricDebug debug = new FieldCentricDebug();
         debug.fieldCentricEnabled = fieldCentric;
-        debug.rawX = x;
-        debug.rawY = y;
-        debug.rawTurn = rxDriver;
+        debug.rawX = rawXInput;
+        debug.rawY = rawYInput;
+        debug.rawTurn = rawTurnInput;
         debug.turnAssistActive = (turnAssistErrorRad != null);
         debug.turnAssistOutput = lastTurnAssistOutput;
         debug.appliedTurn = rx;
         debug.slowTurn = slowTurn;
         debug.headingRad = headingRad;
         debug.headingDeg = Math.toDegrees(headingRad);
+        debug.translationScale = translationScale;
+        debug.turnScale = turnScale;
+        debug.slowModeActive = slowMode;
         debug.rotatedX = rotX;
         debug.rotatedY = rotY;
         debug.frontLeftPower = frontLeftPower;
@@ -185,7 +217,49 @@ public class driveTrainChooChoo {
 
         if (gamepad1.back) {
             RobotHardware.imu.resetYaw();
+            headingInitialized = false;
+            imuUpdateTimer.reset();
         }
+    }
+
+    private void engageHoldPosition() {
+        if (!holdPositionActive) {
+            holdPositionActive = true;
+            holdFrontLeftTarget = frontLeftMotor.getCurrentPosition();
+            holdFrontRightTarget = frontRightMotor.getCurrentPosition();
+            holdBackLeftTarget = backLeftMotor.getCurrentPosition();
+            holdBackRightTarget = backRightMotor.getCurrentPosition();
+        }
+
+        double flPower = holdPower(frontLeftMotor, holdFrontLeftTarget);
+        double frPower = holdPower(frontRightMotor, holdFrontRightTarget);
+        double blPower = holdPower(backLeftMotor, holdBackLeftTarget);
+        double brPower = holdPower(backRightMotor, holdBackRightTarget);
+
+        frontLeftMotor.setPower(flPower);
+        frontRightMotor.setPower(frPower);
+        backLeftMotor.setPower(blPower);
+        backRightMotor.setPower(brPower);
+    }
+
+    private double holdPower(DcMotor motor, int targetPosition) {
+        int error = targetPosition - motor.getCurrentPosition();
+        double power = error * RobotConstants.SLOW_MODE_HOLD_KP;
+        return Range.clip(power, -RobotConstants.SLOW_MODE_HOLD_MAX_POWER, RobotConstants.SLOW_MODE_HOLD_MAX_POWER);
+    }
+
+    private double getCachedHeadingRad() {
+        if (!headingInitialized
+                || imuUpdateTimer.seconds() >= RobotConstants.IMU_UPDATE_PERIOD_SEC) {
+            cachedHeadingRad = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
+            headingInitialized = true;
+            imuUpdateTimer.reset();
+        }
+        return cachedHeadingRad;
+    }
+
+    public double getHeadingDegrees() {
+        return Math.toDegrees(getCachedHeadingRad());
     }
 
     /** Last commanded PID output for telemetry. */
@@ -344,6 +418,9 @@ public class driveTrainChooChoo {
         public double turnAssistOutput;
         public double appliedTurn;
         public double slowTurn;
+        public boolean slowModeActive;
+        public double translationScale;
+        public double turnScale;
         public double headingRad;
         public double headingDeg;
         public double rotatedX;
@@ -352,9 +429,5 @@ public class driveTrainChooChoo {
         public double frontRightPower;
         public double backLeftPower;
         public double backRightPower;
-    }
-
-    private static double applyDeadband(double value, double deadband) {
-        return (Math.abs(value) < deadband) ? 0.0 : value;
     }
 }

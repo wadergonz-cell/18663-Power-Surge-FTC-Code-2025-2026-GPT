@@ -13,6 +13,11 @@ import org.opencv.core.Mat;
 import org.opencv.imgproc.Imgproc;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Opens "Webcam 1", runs OpenFTC AprilTag (tag36h11), exposes latest pose.
@@ -23,7 +28,7 @@ public class AprilTagHelper {
     // Tag size (meters)
     public static double TAG_SIZE_M = AprilTagCalibration.getTagSizeMeters();
 
-    // Approximated intrinsics for 640x480 (replace with calibrated when ready)
+    // Approximated intrinsics for 640x480 (re  place with calibrated when ready)
     public static double FX = AprilTagCalibration.FX;
     public static double FY = AprilTagCalibration.FY;
     public static double CX = AprilTagCalibration.CX;
@@ -45,9 +50,18 @@ public class AprilTagHelper {
     private final HardwareMap hardwareMap;
     private OpenCvWebcam webcam;
     private AprilTagPipeline pipeline;
+    private volatile boolean streamingRequested = false;
+    private volatile boolean streamingActive = false;
+    private final Map<Integer, DetectionInfo> latestDetectionsById = new HashMap<>();
+    private final Set<Integer> startZoneTagSet = new HashSet<>();
+    private static volatile Integer startZoneTagId = null;
 
     public AprilTagHelper(HardwareMap hardwareMap) {
         this.hardwareMap = hardwareMap;
+        for (int tagId : RobotConstants.START_ZONE_TAG_IDS) {
+            startZoneTagSet.add(tagId);
+        }
+        resetStartZoneTag();
     }
 
     public void init() {
@@ -60,21 +74,56 @@ public class AprilTagHelper {
         pipeline = new AprilTagPipeline(TAG_SIZE_M, FX, FY, CX, CY);
         webcam.setPipeline(pipeline);
 
+        streamingRequested = true;
+
         webcam.openCameraDeviceAsync(new OpenCvCamera.AsyncCameraOpenListener() {
             @Override public void onOpened() {
                 webcam.startStreaming(STREAM_WIDTH, STREAM_HEIGHT, ROTATION);
+                streamingActive = true;
             }
             @Override public void onError(int errorCode) { /* telemetry optional */ }
         });
     }
 
     public void stop() {
+        streamingRequested = false;
+        streamingActive = false;
         try { if (webcam != null) webcam.stopStreaming(); } catch (Exception ignored) {}
+    }
+
+    public void setCameraEnabled(boolean enabled) {
+        streamingRequested = enabled;
+        if (webcam == null) {
+            return;
+        }
+
+        if (enabled && !streamingActive) {
+            try {
+                webcam.startStreaming(STREAM_WIDTH, STREAM_HEIGHT, ROTATION);
+                streamingActive = true;
+            } catch (Exception ignored) {
+            }
+        } else if (!enabled && streamingActive) {
+            try {
+                webcam.stopStreaming();
+            } catch (Exception ignored) {
+            }
+            streamingActive = false;
+        }
+    }
+
+    public boolean isCameraEnabled() {
+        return streamingRequested;
+    }
+
+    public boolean isCameraStreaming() {
+        return streamingActive;
     }
 
     /** Pull latest detection once per loop. */
     public void update() {
         ArrayList<AprilTagDetection> dets = pipeline.getLatestDetections();
+        latestDetectionsById.clear();
         if (dets == null || dets.isEmpty()) {
             hasTarget = false;
             targetId = -1; x_m = y_m = z_m = yawErrorRad = 0;
@@ -83,8 +132,18 @@ public class AprilTagHelper {
 
         // choose closest by z
         AprilTagDetection best = dets.get(0);
-        for (int i = 1; i < dets.size(); i++) {
-            if (dets.get(i).pose.z < best.pose.z) best = dets.get(i);
+        for (int i = 0; i < dets.size(); i++) {
+            AprilTagDetection detection = dets.get(i);
+            DetectionInfo info = DetectionInfo.fromDetection(detection);
+            latestDetectionsById.put(detection.id, info);
+
+            if (startZoneTagId == null && startZoneTagSet.contains(detection.id)) {
+                startZoneTagId = detection.id;
+            }
+
+            if (detection.pose.z < best.pose.z) {
+                best = detection;
+            }
         }
 
         hasTarget   = true;
@@ -103,6 +162,31 @@ public class AprilTagHelper {
     public double  getZ_m()         { return z_m; }
     public double  getYawErrorRad() { return yawErrorRad; }
 
+    /** Returns the cached ID for the first start-zone tag (21/22/23) detected this match. */
+    public static Integer getStartZoneTagId() {
+        return startZoneTagId;
+    }
+
+    public static boolean hasStartZoneTag() {
+        return startZoneTagId != null;
+    }
+
+    public static void resetStartZoneTag() {
+        startZoneTagId = null;
+    }
+
+    /**
+     * Returns detection info for a specific AprilTag ID if it was seen on the latest frame.
+     */
+    public DetectionInfo getDetectionInfo(int tagId) {
+        return latestDetectionsById.get(tagId);
+    }
+
+    /** Returns all detections from the most recent frame. */
+    public Collection<DetectionInfo> getAllDetections() {
+        return latestDetectionsById.values();
+    }
+
     // ---- Minimal AprilTag pipeline using OpenFTC native detector ----
     private static class AprilTagPipeline extends OpenCvPipeline {
         private final double tagSize, fx, fy, cx, cy;
@@ -115,8 +199,8 @@ public class AprilTagHelper {
             this.fx = fx; this.fy = fy; this.cx = cx; this.cy = cy;
             nativeTagPtr = AprilTagDetectorJNI.createApriltagDetector(
                     AprilTagDetectorJNI.TagFamily.TAG_36h11.string,
-                    3,  // decimate
-                    3   // threads
+                    2,  // decimate (higher FPS for smoother tracking)
+                    4   // threads
             );
         }
 
@@ -145,6 +229,46 @@ public class AprilTagHelper {
             } finally {
                 super.finalize();
             }
+        }
+    }
+
+    /** Lightweight DTO describing the pose for a detected tag. */
+    public static class DetectionInfo {
+        public final int id;
+        public final double x_m;
+        public final double y_m;
+        public final double z_m;
+        public final double yawErrorRad;
+
+        private DetectionInfo(int id, double x_m, double y_m, double z_m, double yawErrorRad) {
+            this.id = id;
+            this.x_m = x_m;
+            this.y_m = y_m;
+            this.z_m = z_m;
+            this.yawErrorRad = yawErrorRad;
+        }
+
+        static DetectionInfo fromDetection(AprilTagDetection detection) {
+            double yaw = Math.atan2(detection.pose.x, detection.pose.z);
+            return new DetectionInfo(
+                    detection.id,
+                    detection.pose.x,
+                    detection.pose.y,
+                    detection.pose.z,
+                    yaw
+            );
+        }
+
+        public double getHorizontalRangeInches() {
+            return detectionMetersToInches(z_m);
+        }
+
+        public double getYawErrorDegrees() {
+            return Math.toDegrees(yawErrorRad);
+        }
+
+        private static double detectionMetersToInches(double meters) {
+            return meters * 39.3701;
         }
     }
 }
