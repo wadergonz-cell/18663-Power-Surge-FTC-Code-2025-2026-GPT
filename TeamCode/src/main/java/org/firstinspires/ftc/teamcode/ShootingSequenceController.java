@@ -27,10 +27,10 @@ public class ShootingSequenceController {
     private static final double BLOCKER_DOWN_POS = 0.55;
 
     // Intake speeds
-    private static final double INTAKE_FULL_SPEED = 1.0;
-    private static final double FRONT_INTAKE_SPEED = -0.7;
-    private static final double INTAKE_HOLD_SPEED = 0.3;
-    private static final double INTAKE_ROTATION_SPEED = 0.5;
+    private static final double INTAKE_FULL_SPEED = 0.8;
+    private static final double FRONT_INTAKE_SPEED = -0.8;
+    private static final double INTAKE_HOLD_SPEED = 0.25;
+    private static final double INTAKE_ROTATION_SPEED = 0.3;
 
     // State tracking
     private int aClickCount = 0;

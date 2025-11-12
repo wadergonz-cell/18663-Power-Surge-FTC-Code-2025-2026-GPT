@@ -10,7 +10,7 @@ public class AprilTagCalibration {
     public static double TAG_SIZE_IN = 3.35;             // black-square size 8.35
     public static double APRIL_TAG_CENTER_HEIGHT_IN = 29.5;
     public static double CAMERA_HEIGHT_IN           = 14.25;
-    public static double CAMERA_PITCH_DEG           = -22.0;   // +down
+    public static double CAMERA_PITCH_DEG           = -14.0;   // +down
     public static double CAMERA_YAW_OFFSET_DEG      = 1.5;    // +left
 
     // Optional intrinsics (at stream size)
