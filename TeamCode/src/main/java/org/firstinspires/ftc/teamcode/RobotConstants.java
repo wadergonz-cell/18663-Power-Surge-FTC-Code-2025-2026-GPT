@@ -42,7 +42,7 @@ public final class RobotConstants {
     public static final double AUTO_ALIGN_POLL_INTERVAL_SEC = 0.02;// Delay between alignment correction polls
 
     // === Shooter monitoring ===
-    public static final double SHOOTER_TARGET_RPM = 80;         // Default shooter RPM target (adjust as needed)
+    public static final double SHOOTER_TARGET_RPM = 90;         // Default shooter RPM target (adjust as needed)
     public static final double SHOOTER_RPM_GREEN_THRESHOLD = 7.0;  // Within 7 RPM → green indicator
     public static final double SHOOTER_RPM_YELLOW_THRESHOLD = 12.0;// Within 12 RPM → yellow indicator
     public static final double SHOOTER_TICKS_PER_REV = 28.0;       // Update if your shooter motors differ
