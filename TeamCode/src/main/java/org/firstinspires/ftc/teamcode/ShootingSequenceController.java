@@ -3,12 +3,13 @@ package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 /**
  * Manages the shooting sequence state machine.
- * Handles A/B/Y/X button clicks and the multi-step shooting logic.
+ * Handles A/B/X button clicks and the multi-step shooting logic.
  */
 public class ShootingSequenceController {
 
@@ -19,6 +20,19 @@ public class ShootingSequenceController {
     private final DcMotor frontIntakeMotor;
     private final Servo outtakeServo;
     private final Servo blockerServo;
+
+    // Shooter tuning constants (moved from RobotConstants for quicker tweaks)
+    public static final double SHOOTER_LOW_SPEED_RPM = 3000;
+    public static final double SHOOTER_HIGH_SPEED_RPM = 6000;
+    public static final double SHOOTER_DEFAULT_RPM = SHOOTER_LOW_SPEED_RPM;
+    public static final double SHOOTER_RPM_GREEN_THRESHOLD = 7.0;
+    public static final double SHOOTER_RPM_YELLOW_THRESHOLD = 12.0;
+    public static final double SHOOTER_TICKS_PER_REV = 28.0;
+    public static final double LONG_RANGE_IDLE_POWER = 0.70;
+    public static final double LONG_RANGE_BURST_POWER = 1.00;
+    public static final double REGULAR_PREFIRE_DELAY_SEC = 0.7;
+    public static final double LONG_RANGE_PREFIRE_DELAY_SEC = 1.2;
+    public static final double OUTTAKE_RELEASE_DURATION_SEC = 0.2;
 
     // Servo positions (FIXED: swapped UP and DOWN for outtake)
     private static final double OUTTAKE_UP_POS   = 0.45;
@@ -34,12 +48,12 @@ public class ShootingSequenceController {
 
     // State tracking
     private int aClickCount = 0;
-    private int yClickCount = 0;
     private boolean prevA = false;
-    private boolean prevY = false;
     private boolean prevX = false;
     private boolean prevB = false;
     private boolean intakeOn = false;
+
+    private static final int DEFAULT_SHOTS_PER_SEQUENCE = 3;
 
     // Shooting sequence state machine
     private enum ShootingState {
@@ -53,10 +67,13 @@ public class ShootingSequenceController {
     private ElapsedTime stepTimer = new ElapsedTime();
     private int currentShootingStep = 0;
 
-    private double shooterTargetRpm = RobotConstants.SHOOTER_TARGET_RPM;
+    private double shooterTargetRpm = SHOOTER_DEFAULT_RPM;
     private double leftShooterRpm = 0.0;
     private double rightShooterRpm = 0.0;
     private boolean longRangeMode = false;
+    private static final double SHOOTER_KP = 0.001;
+    private static final double SHOOTER_KI = 0.25;
+    private static final double SHOOTER_KD = 0.008;
 
     // Intake rotation targets (tune here for quick adjustments)
     private static final double INTAKE_REVERSE_ROTATIONS = 0.0; // retract a quarter turn for consistent staging
@@ -97,7 +114,7 @@ public class ShootingSequenceController {
     /**
      * Call every TeleOp loop with gamepad input and AprilTag info.
      */
-    public void update(boolean aPressed, boolean bPressed, boolean yPressed, boolean xPressed,
+    public void update(boolean aPressed, boolean bPressed, boolean xPressed,
                        AprilTagCalibration.Report tagReport) {
 
         updateShooterVelocityEstimate();
@@ -107,6 +124,8 @@ public class ShootingSequenceController {
             cancelSequence();
             blockerServo.setPosition(BLOCKER_UP_POS);
             outtakeServo.setPosition(OUTTAKE_UP_POS);
+            leftOuttakeMotor.setPower(0);
+            rightOuttakeMotor.setPower(0);
         }
         prevX = xPressed;
 
@@ -125,12 +144,6 @@ public class ShootingSequenceController {
             }
         }
         prevB = bPressed;
-
-        // Y button: increment shot count
-        if (yPressed && !prevY) {
-            yClickCount++;
-        }
-        prevY = yPressed;
 
         // A button state machine
         if (aPressed && !prevA) {
@@ -164,7 +177,6 @@ public class ShootingSequenceController {
         switch (aClickCount) {
             case 1:
                 // First click: prepare for shooting
-                yClickCount = 0; // Reset shot counter
                 blockerServo.setPosition(BLOCKER_DOWN_POS);
 
                 // Only start intake if B button already turned it on
@@ -192,7 +204,7 @@ public class ShootingSequenceController {
                     intakeMotor.setPower(0.0);
                     frontIntakeMotor.setPower(0.0);
                     shootingState = ShootingState.SHOOTING;
-                    shotsToFire = Math.max(1, yClickCount);
+                    shotsToFire = DEFAULT_SHOTS_PER_SEQUENCE;
                     shotsFired = 0;
                     currentShootingStep = 0;
                     stepTimer.reset();
@@ -244,11 +256,11 @@ public class ShootingSequenceController {
             case 1: {
                 // Step 2: Allow shooter to spin before releasing the ring
                 double requiredDelay = longRangeMode
-                        ? RobotConstants.LONG_RANGE_PREFIRE_DELAY_SEC
-                        : RobotConstants.REGULAR_PREFIRE_DELAY_SEC;
+                        ? LONG_RANGE_PREFIRE_DELAY_SEC
+                        : REGULAR_PREFIRE_DELAY_SEC;
 
                 if (longRangeMode) {
-                    setShooterPower(RobotConstants.LONG_RANGE_BURST_POWER);
+                    setShooterPower(LONG_RANGE_BURST_POWER);
                 } else {
                     spinUpMotors();
                 }
@@ -266,7 +278,7 @@ public class ShootingSequenceController {
             case 2:
                 // Step 3: Keep the outtake servo down long enough for the ring to clear
                 outtakeServo.setPosition(OUTTAKE_DOWN_POS);
-                if (elapsed >= RobotConstants.OUTTAKE_RELEASE_DURATION_SEC) {
+                if (elapsed >= OUTTAKE_RELEASE_DURATION_SEC) {
                     currentShootingStep++;
                     stepTimer.reset();
                 }
@@ -290,7 +302,7 @@ public class ShootingSequenceController {
                     currentShootingStep++;
                     stepTimer.reset();
                     if (longRangeMode) {
-                        setShooterPower(RobotConstants.LONG_RANGE_IDLE_POWER);
+                        setShooterPower(LONG_RANGE_IDLE_POWER);
                     }
                 }
                 break;
@@ -326,7 +338,6 @@ public class ShootingSequenceController {
                         // All shots done
                         shootingState = ShootingState.IDLE;
                         aClickCount = 0;
-                        yClickCount = 0;
                         stopShooter();
                     } else {
                         // Repeat steps
@@ -340,7 +351,6 @@ public class ShootingSequenceController {
     private void startShooter() {
         shooterSpinning = true;
         applyCurrentShooterModePower();
-        shooterTargetRpm = RobotConstants.SHOOTER_TARGET_RPM;
     }
 
     private void stopShooter() {
@@ -348,14 +358,13 @@ public class ShootingSequenceController {
         rightOuttakeMotor.setPower(0.0);
         shooterSpinning = false;
         currentShooterPowerCommand = 0.0;
-        shooterTargetRpm = 0.0;
+        shooterTargetRpm = SHOOTER_DEFAULT_RPM;
         setLongRangeMode(false);
     }
 
     private void cancelSequence() {
         shootingState = ShootingState.IDLE;
         aClickCount = 0;
-        yClickCount = 0;
         shotsFired = 0;
         currentShootingStep = 0;
 
@@ -371,7 +380,6 @@ public class ShootingSequenceController {
 
     // Getters for telemetry
     public int getAClickCount() { return aClickCount; }
-    public int getYClickCount() { return yClickCount; }
     public ShootingState getShootingState() { return shootingState; }
     public int getShotsFired() { return shotsFired; }
     public boolean isIntakeOn() { return intakeOn; }
@@ -398,11 +406,17 @@ public class ShootingSequenceController {
 
     public void setShooterTargetRpm(double targetRpm) {
         shooterTargetRpm = targetRpm;
+        if (shooterSpinning && !longRangeMode) {
+            applyShooterVelocity(shooterTargetRpm);
+        }
     }
 
     private void applyCurrentShooterModePower() {
-        double power = longRangeMode ? RobotConstants.LONG_RANGE_IDLE_POWER : SHOOTER_SPIN_POWER;
-        setShooterPower(power);
+        if (longRangeMode) {
+            setShooterPower(LONG_RANGE_IDLE_POWER);
+        } else {
+            applyShooterVelocity(shooterTargetRpm);
+        }
     }
 
     private void setShooterPower(double power) {
@@ -411,12 +425,46 @@ public class ShootingSequenceController {
         currentShooterPowerCommand = power;
     }
 
+    private void applyShooterVelocity(double targetRpm) {
+        double targetTicksPerSecond = rpmToTicksPerSecond(targetRpm);
+        PIDFCoefficients coefficients = new PIDFCoefficients(
+                SHOOTER_KP,
+                SHOOTER_KI,
+                SHOOTER_KD,
+                computeFeedforward(leftOuttakeMotor)
+        );
+
+        leftOuttakeMotor.setVelocityPIDFCoefficients(
+                coefficients.p, coefficients.i, coefficients.d, coefficients.f);
+        rightOuttakeMotor.setVelocityPIDFCoefficients(
+                coefficients.p, coefficients.i, coefficients.d, coefficients.f);
+
+        leftOuttakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        rightOuttakeMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+
+        leftOuttakeMotor.setVelocity(targetTicksPerSecond);
+        rightOuttakeMotor.setVelocity(targetTicksPerSecond);
+        currentShooterPowerCommand = targetRpm;
+    }
+
     private void updateShooterVelocityEstimate() {
         leftShooterRpm = ticksPerSecondToRpm(leftOuttakeMotor.getVelocity());
         rightShooterRpm = ticksPerSecondToRpm(rightOuttakeMotor.getVelocity());
     }
 
+    private double computeFeedforward(DcMotorEx motor) {
+        double achievableTicksPerSecond = motor.getMotorType().getAchieveableMaxTicksPerSecond();
+        if (achievableTicksPerSecond <= 0) {
+            return 0.0;
+        }
+        return 32767.0 / achievableTicksPerSecond;
+    }
+
+    private double rpmToTicksPerSecond(double rpm) {
+        return (rpm * SHOOTER_TICKS_PER_REV) / 60.0;
+    }
+
     private double ticksPerSecondToRpm(double ticksPerSecond) {
-        return (ticksPerSecond * 60.0) / RobotConstants.SHOOTER_TICKS_PER_REV;
+        return (ticksPerSecond * 60.0) / SHOOTER_TICKS_PER_REV;
     }
 }

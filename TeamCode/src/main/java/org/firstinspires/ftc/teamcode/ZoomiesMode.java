@@ -21,6 +21,9 @@ public class ZoomiesMode extends LinearOpMode {
     private boolean leftBumperLatch = false;
     private boolean prevDpadUp = false;
     private boolean prevDpadDown = false;
+    private boolean fieldCentricEnabled = true;
+    private boolean prevY = false;
+    private boolean shooterHighSpeedMode = false;
 
     @Override
     public void runOpMode() throws InterruptedException {
@@ -28,12 +31,14 @@ public class ZoomiesMode extends LinearOpMode {
         driveTrainChooChoo = new driveTrainChooChoo(RobotHardware);
         theForbiddenButtons = new theForbiddenButtons(RobotHardware);
         shootingSequence = new ShootingSequenceController(RobotHardware);
+        shootingSequence.setShooterTargetRpm(ShootingSequenceController.SHOOTER_LOW_SPEED_RPM);
 
         vision = new AprilTagHelper(hardwareMap);
         vision.init();
 
         telemetry.addLine("ZoomiesMode Ready");
-        telemetry.addLine("A: Shoot sequence  |  Y: Add shot  |  X: Cancel");
+        telemetry.addLine("A: Shoot sequence  |  Y: Drive mode  |  X: Cancel");
+        telemetry.addLine("D-pad: Shooter speed (⬆ high / ⬇ low)");
         telemetry.update();
 
         while (!isStarted() && !isStopRequested()) {
@@ -76,14 +81,21 @@ public class ZoomiesMode extends LinearOpMode {
             boolean dpadUp = gamepad1.dpad_up;
             boolean dpadDown = gamepad1.dpad_down;
             if (dpadUp && !prevDpadUp) {
-                shootingSequence.setLongRangeMode(true);
+                shooterHighSpeedMode = true;
+                shootingSequence.setShooterTargetRpm(ShootingSequenceController.SHOOTER_HIGH_SPEED_RPM);
             }
             if (dpadDown && !prevDpadDown) {
-                // Down toggles off
-                shootingSequence.setLongRangeMode(false);
+                shooterHighSpeedMode = false;
+                shootingSequence.setShooterTargetRpm(ShootingSequenceController.SHOOTER_LOW_SPEED_RPM);
             }
             prevDpadUp = dpadUp;
             prevDpadDown = dpadDown;
+
+            boolean yPressed = gamepad1.y;
+            if (yPressed && !prevY) {
+                fieldCentricEnabled = !fieldCentricEnabled;
+            }
+            prevY = yPressed;
 
             Double turnAssist = null;
             if (cameraTrackingEnabled && tagReport.hasTag) {
@@ -92,14 +104,13 @@ public class ZoomiesMode extends LinearOpMode {
             driveTrainChooChoo.setTurnAssist(turnAssist);
 
             // Drive
-            driveTrainChooChoo.driveFieldCentric(gamepad1);
+            driveTrainChooChoo.drive(gamepad1, fieldCentricEnabled);
             theForbiddenButtons.driveOnlyInputs(gamepad1);
 
             // Shooting sequence controller
             shootingSequence.update(
                     gamepad1.a,
                     gamepad1.b,
-                    gamepad1.y,
                     gamepad1.x,
                     tagReport
             );
@@ -109,15 +120,20 @@ public class ZoomiesMode extends LinearOpMode {
                     boolEmoji(tagReport.hasTag)));
             telemetry.addLine(startZoneStatusLine());
 
+            telemetry.addLine(String.format("Drive mode 🚗 - %s",
+                    fieldCentricEnabled ? "Field-centric" : "Robot-centric"));
+            telemetry.addLine(String.format("Shooter mode 🎯 - %s (target %.0f RPM)",
+                    shooterHighSpeedMode ? "High speed" : "Low speed",
+                    shootingSequence.getShooterTargetRpm()));
+
             String spinLine = String.format("Spin-up state 😵‍💫 - L%s R%s",
                     rpmEmoji(shootingSequence.getShooterTargetRpm(), shootingSequence.getLeftShooterRpm()),
                     rpmEmoji(shootingSequence.getShooterTargetRpm(), shootingSequence.getRightShooterRpm()));
-            if (shootingSequence.isLongRangeModeActive()) {
-                spinLine += " LR🟣";
-            }
             telemetry.addLine(spinLine);
 
-            telemetry.addLine(yCountLine(shootingSequence.getYClickCount()));
+            telemetry.addLine(String.format("Shooter RPM 📈 - L %.1f | R %.1f",
+                    shootingSequence.getLeftShooterRpm(),
+                    shootingSequence.getRightShooterRpm()));
 
             Integer startZoneTag = AprilTagHelper.getStartZoneTagId();
             telemetry.addLine(startZoneTag != null
@@ -147,30 +163,16 @@ public class ZoomiesMode extends LinearOpMode {
         return condition ? "🟢" : "🔴";
     }
 
-    private String yCountLine(int yCount) {
-        if (yCount <= 0) {
-            return "Y count ⚪ - none";
-        }
-        StringBuilder builder = new StringBuilder("Y count ⚪ - ");
-        for (int i = 0; i < yCount; i++) {
-            if (i > 0) {
-                builder.append(' ');
-            }
-            builder.append("⚪");
-        }
-        return builder.toString();
-    }
-
     private String rpmEmoji(double targetRpm, double currentRpm) {
         if (targetRpm <= 0.0) {
             return "🔴";
         }
 
         double error = Math.abs(targetRpm - currentRpm);
-        if (error <= RobotConstants.SHOOTER_RPM_GREEN_THRESHOLD) {
+        if (error <= ShootingSequenceController.SHOOTER_RPM_GREEN_THRESHOLD) {
             return "🟢";
         }
-        if (error <= RobotConstants.SHOOTER_RPM_YELLOW_THRESHOLD) {
+        if (error <= ShootingSequenceController.SHOOTER_RPM_YELLOW_THRESHOLD) {
             return "🟡";
         }
         return "🔴";

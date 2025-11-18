@@ -41,19 +41,6 @@ public final class RobotConstants {
     public static final double AUTO_ALIGN_TURN_TOLERANCE_DEG = 2.0;// Acceptable yaw error before considering aligned
     public static final double AUTO_ALIGN_POLL_INTERVAL_SEC = 0.02;// Delay between alignment correction polls
 
-    // === Shooter monitoring ===
-    public static final double SHOOTER_TARGET_RPM = 90;         // Default shooter RPM target (adjust as needed)
-    public static final double SHOOTER_RPM_GREEN_THRESHOLD = 7.0;  // Within 7 RPM → green indicator
-    public static final double SHOOTER_RPM_YELLOW_THRESHOLD = 12.0;// Within 12 RPM → yellow indicator
-    public static final double SHOOTER_TICKS_PER_REV = 28.0;       // Update if your shooter motors differ
-
-    // === Shooter long range mode ===
-    public static final double LONG_RANGE_IDLE_POWER = 0.70;       // Hold power during spin-up and staging
-    public static final double LONG_RANGE_BURST_POWER = 1.00;      // Power applied while launching each ring
-    public static final double REGULAR_PREFIRE_DELAY_SEC = 0.7;    // Wait before firing in standard mode
-    public static final double LONG_RANGE_PREFIRE_DELAY_SEC = 1.2; // Wait before firing in long range mode
-    public static final double OUTTAKE_RELEASE_DURATION_SEC = 0.2; // Time to keep the outtake servo down
-
     // === Drivetrain geometry ===
     public static final double DRIVE_WHEEL_DIAMETER_IN = 4.0;      // AndyMark 4" BB Mecanum wheels
     public static final double DRIVE_GEAR_REDUCTION = 1.0;         // Change if external gearing is added

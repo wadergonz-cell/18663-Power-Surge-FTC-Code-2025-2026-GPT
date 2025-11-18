@@ -8,6 +8,8 @@ import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.Range;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
+import org.firstinspires.ftc.teamcode.ShootingSequenceController;
+
 @Autonomous(name = "Auto - Encoder Blocks", group = "Auto")
 public class EncoderBlocksAuto extends LinearOpMode {
 
@@ -46,7 +48,6 @@ public class EncoderBlocksAuto extends LinearOpMode {
         }
 
         drive.driveForward(-3.0, 0.3);
-        ShootConfig.rpmShots(2, 2).withDropBlockerOnStart(true);
         Integer startTag = drive.scanForStartZoneTag(vision, 2.0);
 
         if (startTag != null) {
@@ -120,9 +121,6 @@ public class EncoderBlocksAuto extends LinearOpMode {
         }
 
         // === Block-style movement helpers ===
-        public void driveForward(double inches) {
-            driveForward(inches, RobotConstants.AUTO_DRIVE_MAX_POWER);
-        }
 
         public void driveForward(double inches, double power) {
             runMecanum(inchesToTicks(inches), 0, power);
@@ -256,24 +254,24 @@ public class EncoderBlocksAuto extends LinearOpMode {
             outtakeServo.setPosition(RobotConstants.OUTTAKE_UP_POSITION);
 
             if (mode == ShooterMode.HIGH_SPEED) {
-                setShooterPower(RobotConstants.LONG_RANGE_IDLE_POWER);
+                setShooterPower(ShootingSequenceController.LONG_RANGE_IDLE_POWER);
             } else {
                 setShooterVelocity(config.targetRpm);
             }
 
             while (opMode.opModeIsActive() && shotsRemaining > 0) {
                 if (mode == ShooterMode.HIGH_SPEED) {
-                    setShooterPower(RobotConstants.LONG_RANGE_BURST_POWER);
-                    waitSeconds(RobotConstants.LONG_RANGE_PREFIRE_DELAY_SEC);
+                    setShooterPower(ShootingSequenceController.LONG_RANGE_BURST_POWER);
+                    waitSeconds(ShootingSequenceController.LONG_RANGE_PREFIRE_DELAY_SEC);
                 } else {
                     if (!waitForShooterReady(config.targetRpm, config.readyTimeoutSec)) {
                         break;
                     }
-                    waitSeconds(RobotConstants.REGULAR_PREFIRE_DELAY_SEC);
+                    waitSeconds(ShootingSequenceController.REGULAR_PREFIRE_DELAY_SEC);
                 }
 
                 outtakeServo.setPosition(RobotConstants.OUTTAKE_DOWN_POSITION);
-                waitSeconds(RobotConstants.OUTTAKE_RELEASE_DURATION_SEC);
+                waitSeconds(ShootingSequenceController.OUTTAKE_RELEASE_DURATION_SEC);
                 outtakeServo.setPosition(RobotConstants.OUTTAKE_UP_POSITION);
 
                 blockerServo.setPosition(RobotConstants.BLOCKER_UP_POSITION);
@@ -288,7 +286,7 @@ public class EncoderBlocksAuto extends LinearOpMode {
                 blockerServo.setPosition(RobotConstants.BLOCKER_DOWN_POSITION);
 
                 if (mode == ShooterMode.HIGH_SPEED) {
-                    setShooterPower(RobotConstants.LONG_RANGE_IDLE_POWER);
+                    setShooterPower(ShootingSequenceController.LONG_RANGE_IDLE_POWER);
                 } else {
                     // keep velocity target applied
                     setShooterVelocity(config.targetRpm);
@@ -310,6 +308,10 @@ public class EncoderBlocksAuto extends LinearOpMode {
 
         private void setShooterVelocity(double targetRpm) {
             double ticksPerSecond = rpmToTicksPerSecond(targetRpm);
+            double feedforward = shooterFeedforward(leftShooter);
+            leftShooter.setVelocityPIDFCoefficients(0.0, 0.0, 0.0, feedforward);
+            rightShooter.setVelocityPIDFCoefficients(0.0, 0.0, 0.0, feedforward);
+
             leftShooter.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
             rightShooter.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
             leftShooter.setVelocity(ticksPerSecond);
@@ -341,11 +343,11 @@ public class EncoderBlocksAuto extends LinearOpMode {
             double leftRpm = ticksPerSecondToRpm(leftShooter.getVelocity());
             double rightRpm = ticksPerSecondToRpm(rightShooter.getVelocity());
 
-            boolean leftGreen = Math.abs(targetRpm - leftRpm) <= RobotConstants.SHOOTER_RPM_GREEN_THRESHOLD;
-            boolean rightGreen = Math.abs(targetRpm - rightRpm) <= RobotConstants.SHOOTER_RPM_GREEN_THRESHOLD;
+            boolean leftGreen = Math.abs(targetRpm - leftRpm) <= ShootingSequenceController.SHOOTER_RPM_GREEN_THRESHOLD;
+            boolean rightGreen = Math.abs(targetRpm - rightRpm) <= ShootingSequenceController.SHOOTER_RPM_GREEN_THRESHOLD;
 
-            boolean leftYellow = Math.abs(targetRpm - leftRpm) <= RobotConstants.SHOOTER_RPM_YELLOW_THRESHOLD;
-            boolean rightYellow = Math.abs(targetRpm - rightRpm) <= RobotConstants.SHOOTER_RPM_YELLOW_THRESHOLD;
+            boolean leftYellow = Math.abs(targetRpm - leftRpm) <= ShootingSequenceController.SHOOTER_RPM_YELLOW_THRESHOLD;
+            boolean rightYellow = Math.abs(targetRpm - rightRpm) <= ShootingSequenceController.SHOOTER_RPM_YELLOW_THRESHOLD;
 
             return (leftGreen && rightGreen)
                     || (leftGreen && rightYellow)
@@ -365,11 +367,19 @@ public class EncoderBlocksAuto extends LinearOpMode {
         }
 
         private double rpmToTicksPerSecond(double rpm) {
-            return (rpm * RobotConstants.SHOOTER_TICKS_PER_REV) / 60.0;
+            return (rpm * ShootingSequenceController.SHOOTER_TICKS_PER_REV) / 60.0;
         }
 
         private double ticksPerSecondToRpm(double ticksPerSecond) {
-            return (ticksPerSecond * 60.0) / RobotConstants.SHOOTER_TICKS_PER_REV;
+            return (ticksPerSecond * 60.0) / ShootingSequenceController.SHOOTER_TICKS_PER_REV;
+        }
+
+        private double shooterFeedforward(DcMotorEx motor) {
+            double achievableTicksPerSecond = motor.getMotorType().getAchieveableMaxTicksPerSecond();
+            if (achievableTicksPerSecond <= 0.0) {
+                return 0.0;
+            }
+            return 32767.0 / achievableTicksPerSecond;
         }
 
         private void runMecanum(int forwardTicks, int strafeTicks, double power) {
@@ -442,7 +452,7 @@ public class EncoderBlocksAuto extends LinearOpMode {
 
     public static class ShootConfig {
         private ShooterMode mode = ShooterMode.RPM;
-        private double targetRpm = RobotConstants.SHOOTER_TARGET_RPM;
+        private double targetRpm = ShootingSequenceController.SHOOTER_DEFAULT_RPM;
         private int shots = 1;
         private boolean dropBlockerOnStart = true;
         private double intakeAdvancePower = RobotConstants.AUTO_INTAKE_POWER;
