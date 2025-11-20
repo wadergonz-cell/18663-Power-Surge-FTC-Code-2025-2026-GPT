@@ -22,8 +22,8 @@ public class ShootingSequenceController {
     private final Servo blockerServo;
 
     // Shooter tuning constants (moved from RobotConstants for quicker tweaks)
-    public static final double SHOOTER_LOW_SPEED_RPM = 3000;
-    public static final double SHOOTER_HIGH_SPEED_RPM = 6000;
+    public static final double SHOOTER_LOW_SPEED_RPM = 3250;
+    public static final double SHOOTER_HIGH_SPEED_RPM = 3250;  //set to 7000 for true high power, changed for a janky auto fix
     public static final double SHOOTER_DEFAULT_RPM = SHOOTER_LOW_SPEED_RPM;
     public static final double SHOOTER_RPM_GREEN_THRESHOLD = 7.0;
     public static final double SHOOTER_RPM_YELLOW_THRESHOLD = 12.0;
@@ -71,9 +71,9 @@ public class ShootingSequenceController {
     private double leftShooterRpm = 0.0;
     private double rightShooterRpm = 0.0;
     private boolean longRangeMode = false;
-    private static final double SHOOTER_KP = 0.001;
-    private static final double SHOOTER_KI = 0.25;
-    private static final double SHOOTER_KD = 0.008;
+    private static final double SHOOTER_KP = 0.0004;
+    private static final double SHOOTER_KI = 0.05;
+    private static final double SHOOTER_KD = 0.08;
 
     // Intake rotation targets (tune here for quick adjustments)
     private static final double INTAKE_REVERSE_ROTATIONS = 0.0; // retract a quarter turn for consistent staging

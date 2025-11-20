@@ -47,24 +47,26 @@ public class EncoderBlocksAuto extends LinearOpMode {
             return;
         }
 
-        drive.driveForward(-3.0, 0.3);
-        Integer startTag = drive.scanForStartZoneTag(vision, 2.0);
+        /* drive.driveForward(48.0, 0.3);
 
-        if (startTag != null) {
-            if (startTag == 21) {
-                drive.driveForward(3.0, 0.3);
-            } else if (startTag == 22) {
-                drive.driveForward(1.0, 0.3);
-            } else if (startTag == 23) {
-                drive.driveForward(-2.0, 0.3);
-            }
-        } else {
-            drive.turnDegrees(-45.0, 0.32);
-        }
 
         drive.pause(2);
 
-        boolean aligned = drive.autoAlignToTag(vision, 20, 3);
+       // boolean aligned = drive.autoAlignToTag(vision, 20, 1);
+        drive.shoot(EncoderBlocksAuto.ShootConfig.highSpeedShots(3));
+        drive.turnDegrees(-55);   //negative for blue, positive for red
+        drive.driveForward(40, 0.3);
+
+
+    */
+        drive.pause(3);
+        drive.driveForward(-76, 0.3);
+        drive.turnDegrees(60);
+        drive.driveForward(-3, 0.3);
+        drive.shoot(EncoderBlocksAuto.ShootConfig.highSpeedShots(3));
+        drive.turnDegrees(-60);
+        drive.driveForward(40, 0.3);
+        drive.turnDegrees(-90);
 
         drive.stopAll();
         drive.stopMechanisms();
@@ -261,7 +263,8 @@ public class EncoderBlocksAuto extends LinearOpMode {
 
             while (opMode.opModeIsActive() && shotsRemaining > 0) {
                 if (mode == ShooterMode.HIGH_SPEED) {
-                    setShooterPower(ShootingSequenceController.LONG_RANGE_BURST_POWER);
+                    //setShooterPower(ShootingSequenceController.LONG_RANGE_BURST_POWER);
+                    setShooterPower(0.7);
                     waitSeconds(ShootingSequenceController.LONG_RANGE_PREFIRE_DELAY_SEC);
                 } else {
                     if (!waitForShooterReady(config.targetRpm, config.readyTimeoutSec)) {
