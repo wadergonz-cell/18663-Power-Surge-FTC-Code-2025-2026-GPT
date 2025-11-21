@@ -22,11 +22,11 @@ public class ShootingSequenceController {
     private final Servo blockerServo;
 
     // Shooter tuning constants (moved from RobotConstants for quicker tweaks)
-    public static final double SHOOTER_LOW_SPEED_RPM = 3250;
-    public static final double SHOOTER_HIGH_SPEED_RPM = 3250;  //set to 7000 for true high power, changed for a janky auto fix
+    public static final double SHOOTER_LOW_SPEED_RPM = 3000;
+    public static final double SHOOTER_HIGH_SPEED_RPM = 7000;  //set to 7000 for true high power, changed for a janky auto fix
     public static final double SHOOTER_DEFAULT_RPM = SHOOTER_LOW_SPEED_RPM;
-    public static final double SHOOTER_RPM_GREEN_THRESHOLD = 7.0;
-    public static final double SHOOTER_RPM_YELLOW_THRESHOLD = 12.0;
+    public static final double SHOOTER_RPM_GREEN_THRESHOLD = 80.0;
+    public static final double SHOOTER_RPM_YELLOW_THRESHOLD = 170.0;
     public static final double SHOOTER_TICKS_PER_REV = 28.0;
     public static final double LONG_RANGE_IDLE_POWER = 0.70;
     public static final double LONG_RANGE_BURST_POWER = 1.00;
@@ -43,8 +43,8 @@ public class ShootingSequenceController {
     // Intake speeds
     private static final double INTAKE_FULL_SPEED = 0.80;
     private static final double FRONT_INTAKE_SPEED = -0.8;
-    private static final double INTAKE_HOLD_SPEED = 0.25;
-    private static final double INTAKE_ROTATION_SPEED = 0.3;
+    private static final double INTAKE_HOLD_SPEED = 0.8;
+    private static final double INTAKE_ROTATION_SPEED = 0.7;
 
     // State tracking
     private int aClickCount = 0;
@@ -72,8 +72,8 @@ public class ShootingSequenceController {
     private double rightShooterRpm = 0.0;
     private boolean longRangeMode = false;
     private static final double SHOOTER_KP = 0.0004;
-    private static final double SHOOTER_KI = 0.05;
-    private static final double SHOOTER_KD = 0.08;
+    private static final double SHOOTER_KI = 0.04;
+    private static final double SHOOTER_KD = 0.16;
 
     // Intake rotation targets (tune here for quick adjustments)
     private static final double INTAKE_REVERSE_ROTATIONS = 0.0; // retract a quarter turn for consistent staging

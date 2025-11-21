@@ -4,14 +4,15 @@ import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import com.qualcomm.robotcore.hardware.Servo;
-import com.qualcomm.robotcore.util.Range;
 import com.qualcomm.robotcore.util.ElapsedTime;
+import com.qualcomm.robotcore.util.Range;
 
 import org.firstinspires.ftc.teamcode.ShootingSequenceController;
 
-@Autonomous(name = "Auto - Encoder Blocks", group = "Auto")
-public class EncoderBlocksAuto extends LinearOpMode {
+@Autonomous(name = "🔴RedAllianceFarSide🟡", group = "Auto")
+public class RedAllianceFarSide extends LinearOpMode {
 
     private robotHardware hardware;
     private DriveBlocks drive;
@@ -47,27 +48,25 @@ public class EncoderBlocksAuto extends LinearOpMode {
             return;
         }
 
-        /* drive.driveForward(48.0, 0.3);
+        // Example toggle: keep the intakes running at a chosen speed while driving and shooting
+        drive.blockerDown();
 
 
-        drive.pause(2);
-
-       // boolean aligned = drive.autoAlignToTag(vision, 20, 1);
-        drive.shoot(EncoderBlocksAuto.ShootConfig.highSpeedShots(3));
-        drive.turnDegrees(-55);   //negative for blue, positive for red
-        drive.driveForward(40, 0.3);
 
 
-    */
-        drive.pause(3);
-        drive.driveForward(-76, 0.3);
-        drive.turnDegrees(60);
-        drive.driveForward(-3, 0.3);
-        drive.shoot(EncoderBlocksAuto.ShootConfig.highSpeedShots(3));
-        drive.turnDegrees(-60);
-        drive.driveForward(40, 0.3);
-        drive.turnDegrees(-90);
+        drive.pause(15);
 
+
+
+
+        drive.driveForward(-76, 0.8);
+        drive.turnDegrees(-60, 0.7);
+        drive.shoot(RedAllianceFarSide.ShootConfig.rpmShots(3, 2900));
+        drive.turnDegrees(60, 0.7);
+        drive.driveForward(40, 0.8);
+        drive.turnDegrees(125, 0.7);
+
+        drive.stopIntakeContinuous();
         drive.stopAll();
         drive.stopMechanisms();
         vision.stop();
@@ -88,6 +87,27 @@ public class EncoderBlocksAuto extends LinearOpMode {
         private final DcMotor frontIntake;
         private final Servo outtakeServo;
         private final Servo blockerServo;
+
+        private boolean intakeToggledOn = false;
+        private double intakeToggleMainPower = 0.0;
+        private double intakeToggleFrontPower = 0.0;
+
+        // Shooter PID values mirrored from TeleOp
+        private static final double SHOOTER_KP = 0.0004;
+        private static final double SHOOTER_KI = 0.04;
+        private static final double SHOOTER_KD = 0.16;
+
+        // TeleOp-style shooting constants reused for autonomous firing
+        private static final double INTAKE_ROTATION_SPEED = 0.3;
+        private static final double INTAKE_REVERSE_ROTATIONS = 0.0;
+        private static final double INTAKE_FORWARD_ROTATIONS = 0.8;
+        private static final double ENCODER_COUNTS_PER_ROTATION = 537.6;
+        private static final int INTAKE_REVERSE_TICKS = (int) Math.max(1,
+                Math.round(ENCODER_COUNTS_PER_ROTATION * INTAKE_REVERSE_ROTATIONS));
+        private static final int INTAKE_FORWARD_TICKS = (int) Math.max(1,
+                Math.round(ENCODER_COUNTS_PER_ROTATION * INTAKE_FORWARD_ROTATIONS));
+        private static final double BLOCKER_STEP_DURATION_SEC = 0.2;
+        private static final double OUTTAKE_RESET_DURATION_SEC = 0.2;
 
         public DriveBlocks(LinearOpMode opMode, robotHardware hardware) {
             this.opMode = opMode;
@@ -116,7 +136,7 @@ public class EncoderBlocksAuto extends LinearOpMode {
         }
 
         public void stopMechanisms() {
-            setIntakePower(0.0, 0.0);
+            stopIntakeContinuous();
             stopShooter();
             outtakeServo.setPosition(RobotConstants.OUTTAKE_UP_POSITION);
             blockerServo.setPosition(RobotConstants.BLOCKER_UP_POSITION);
@@ -177,6 +197,32 @@ public class EncoderBlocksAuto extends LinearOpMode {
 
         public void shooterPrimeBlockerDown() {
             blockerServo.setPosition(RobotConstants.BLOCKER_DOWN_POSITION);
+        }
+
+        public void blockerUp() {
+            blockerServo.setPosition(RobotConstants.BLOCKER_UP_POSITION);
+        }
+
+        public void blockerDown() {
+            blockerServo.setPosition(RobotConstants.BLOCKER_DOWN_POSITION);
+        }
+
+        public void startIntakeContinuous(double mainPower, double frontPower) {
+            intakeToggledOn = true;
+            intakeToggleMainPower = mainPower;
+            intakeToggleFrontPower = frontPower;
+            setIntakePower(mainPower, frontPower);
+        }
+
+        public void stopIntakeContinuous() {
+            intakeToggledOn = false;
+            setIntakePower(0.0, 0.0);
+        }
+
+        private void restoreIntakeIfToggled() {
+            if (intakeToggledOn) {
+                setIntakePower(intakeToggleMainPower, intakeToggleFrontPower);
+            }
         }
 
         public Integer scanForStartZoneTag(AprilTagHelper vision, double timeoutSec) {
@@ -245,61 +291,82 @@ public class EncoderBlocksAuto extends LinearOpMode {
                 return;
             }
 
-            ShooterMode mode = config.mode;
-            int shotsRemaining = config.shots;
-
+            // Simulate the TeleOp "A" button sequence: two quick presses, wait two seconds,
+            // then a third press that fires three rings using the same steps as TeleOp.
             if (config.dropBlockerOnStart) {
                 shooterPrimeBlockerDown();
-                waitSeconds(RobotConstants.AUTO_BLOCKER_RESET_DELAY_SEC);
             }
-
             outtakeServo.setPosition(RobotConstants.OUTTAKE_UP_POSITION);
 
-            if (mode == ShooterMode.HIGH_SPEED) {
-                setShooterPower(ShootingSequenceController.LONG_RANGE_IDLE_POWER);
-            } else {
-                setShooterVelocity(config.targetRpm);
-            }
+            // Second press: spin up to low-speed RPM
+            setShooterVelocity(config.targetRpm);
 
+            // Give the shooter time to reach speed before starting the firing loop.
+            waitWithShooterTelemetry(0.5, config.targetRpm);
+
+            int shotsRemaining = config.shots;
+            boolean requireReadyGate = true;
             while (opMode.opModeIsActive() && shotsRemaining > 0) {
-                if (mode == ShooterMode.HIGH_SPEED) {
-                    //setShooterPower(ShootingSequenceController.LONG_RANGE_BURST_POWER);
-                    setShooterPower(0.7);
-                    waitSeconds(ShootingSequenceController.LONG_RANGE_PREFIRE_DELAY_SEC);
-                } else {
-                    if (!waitForShooterReady(config.targetRpm, config.readyTimeoutSec)) {
-                        break;
-                    }
-                    waitSeconds(ShootingSequenceController.REGULAR_PREFIRE_DELAY_SEC);
-                }
-
-                outtakeServo.setPosition(RobotConstants.OUTTAKE_DOWN_POSITION);
-                waitSeconds(ShootingSequenceController.OUTTAKE_RELEASE_DURATION_SEC);
-                outtakeServo.setPosition(RobotConstants.OUTTAKE_UP_POSITION);
-
-                blockerServo.setPosition(RobotConstants.BLOCKER_UP_POSITION);
-                waitSeconds(RobotConstants.AUTO_BLOCKER_RESET_DELAY_SEC);
-
-                if (config.intakeAdvanceSeconds > 0.0) {
-                    runIntake(config.intakeAdvancePower,
-                            config.frontIntakeAdvancePower,
-                            config.intakeAdvanceSeconds);
-                }
-
-                blockerServo.setPosition(RobotConstants.BLOCKER_DOWN_POSITION);
-
-                if (mode == ShooterMode.HIGH_SPEED) {
-                    setShooterPower(ShootingSequenceController.LONG_RANGE_IDLE_POWER);
-                } else {
-                    // keep velocity target applied
-                    setShooterVelocity(config.targetRpm);
-                }
-
+                runTeleOpStyleShot(config, requireReadyGate);
+                requireReadyGate = false; // Only gate the first shot to avoid extra pauses.
                 shotsRemaining--;
             }
 
             stopShooter();
             blockerServo.setPosition(RobotConstants.BLOCKER_UP_POSITION);
+        }
+
+        private void runTeleOpStyleShot(ShootConfig config, boolean requireReadyGate) {
+            // Step 0: retract intake slightly
+            rotateIntakeTicks(-INTAKE_REVERSE_TICKS);
+
+            // Step 1: wait for shooter ready and prefire delay
+            if (requireReadyGate && !waitForShooterReady(config.targetRpm, config.readyTimeoutSec)) {
+                return;
+            }
+            setShooterVelocity(config.targetRpm);
+            waitWithShooterTelemetry(ShootingSequenceController.REGULAR_PREFIRE_DELAY_SEC, config.targetRpm);
+
+            // Step 2: drop outtake to release ring
+            outtakeServo.setPosition(RobotConstants.OUTTAKE_DOWN_POSITION);
+            waitSeconds(ShootingSequenceController.OUTTAKE_RELEASE_DURATION_SEC);
+
+            // Step 3: raise blocker
+            blockerServo.setPosition(RobotConstants.BLOCKER_UP_POSITION);
+            waitSeconds(BLOCKER_STEP_DURATION_SEC);
+
+            // Step 4: reset outtake
+            outtakeServo.setPosition(RobotConstants.OUTTAKE_UP_POSITION);
+            waitSeconds(OUTTAKE_RESET_DURATION_SEC);
+
+            // Step 5: advance intake for next ring
+            rotateIntakeTicks(INTAKE_FORWARD_TICKS);
+
+            // Step 6: lower blocker to stage next ring
+            blockerServo.setPosition(RobotConstants.BLOCKER_DOWN_POSITION);
+            waitSeconds(BLOCKER_STEP_DURATION_SEC);
+
+            // Reinstate any continuous intake that was toggled on
+            restoreIntakeIfToggled();
+        }
+
+        private void rotateIntakeTicks(int tickDelta) {
+            if (tickDelta == 0) {
+                return;
+            }
+
+            int start = intake.getCurrentPosition();
+            int target = start + tickDelta;
+            intake.setTargetPosition(target);
+            intake.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+            intake.setPower(INTAKE_ROTATION_SPEED);
+
+            while (opMode.opModeIsActive() && intake.isBusy()) {
+                opMode.idle();
+            }
+
+            intake.setPower(0.0);
+            intake.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         }
 
         private void setShooterPower(double power) {
@@ -312,8 +379,16 @@ public class EncoderBlocksAuto extends LinearOpMode {
         private void setShooterVelocity(double targetRpm) {
             double ticksPerSecond = rpmToTicksPerSecond(targetRpm);
             double feedforward = shooterFeedforward(leftShooter);
-            leftShooter.setVelocityPIDFCoefficients(0.0, 0.0, 0.0, feedforward);
-            rightShooter.setVelocityPIDFCoefficients(0.0, 0.0, 0.0, feedforward);
+            PIDFCoefficients coefficients = new PIDFCoefficients(
+                    SHOOTER_KP,
+                    SHOOTER_KI,
+                    SHOOTER_KD,
+                    feedforward
+            );
+            leftShooter.setVelocityPIDFCoefficients(
+                    coefficients.p, coefficients.i, coefficients.d, coefficients.f);
+            rightShooter.setVelocityPIDFCoefficients(
+                    coefficients.p, coefficients.i, coefficients.d, coefficients.f);
 
             leftShooter.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
             rightShooter.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
@@ -334,8 +409,11 @@ public class EncoderBlocksAuto extends LinearOpMode {
                     return true;
                 }
                 if (timeoutSec > 0 && timer.seconds() >= timeoutSec) {
-                    return false;
+                    // Even if we never saw "ready" (for example, velocity telemetry unavailable),
+                    // continue the sequence so the auto still fires after the spin-up delay.
+                    return true;
                 }
+                reportShooterTelemetry(targetRpm);
                 opMode.idle();
                 opMode.sleep(10);
             }
@@ -383,6 +461,28 @@ public class EncoderBlocksAuto extends LinearOpMode {
                 return 0.0;
             }
             return 32767.0 / achievableTicksPerSecond;
+        }
+
+        private void waitWithShooterTelemetry(double seconds, double targetRpm) {
+            if (seconds <= 0) {
+                return;
+            }
+            ElapsedTime timer = new ElapsedTime();
+            timer.reset();
+            while (opMode.opModeIsActive() && timer.seconds() < seconds) {
+                reportShooterTelemetry(targetRpm);
+                opMode.idle();
+                opMode.sleep(10);
+            }
+        }
+
+        private void reportShooterTelemetry(double targetRpm) {
+            double leftRpm = ticksPerSecondToRpm(leftShooter.getVelocity());
+            double rightRpm = ticksPerSecondToRpm(rightShooter.getVelocity());
+            opMode.telemetry.addData("Shooter Target RPM", targetRpm);
+            opMode.telemetry.addData("Left Shooter RPM", leftRpm);
+            opMode.telemetry.addData("Right Shooter RPM", rightRpm);
+            opMode.telemetry.update();
         }
 
         private void runMecanum(int forwardTicks, int strafeTicks, double power) {
@@ -461,7 +561,7 @@ public class EncoderBlocksAuto extends LinearOpMode {
         private double intakeAdvancePower = RobotConstants.AUTO_INTAKE_POWER;
         private double frontIntakeAdvancePower = RobotConstants.AUTO_FRONT_INTAKE_POWER;
         private double intakeAdvanceSeconds = RobotConstants.AUTO_INTAKE_ADVANCE_SECONDS;
-        private double readyTimeoutSec = 3.0;
+        private double readyTimeoutSec = 0.5;
 
         public static ShootConfig rpmShots(int shots, double targetRpm) {
             ShootConfig config = new ShootConfig();
@@ -473,8 +573,9 @@ public class EncoderBlocksAuto extends LinearOpMode {
 
         public static ShootConfig highSpeedShots(int shots) {
             ShootConfig config = new ShootConfig();
-            config.mode = ShooterMode.HIGH_SPEED;
+            config.mode = ShooterMode.RPM;
             config.shots = Math.max(1, shots);
+            config.targetRpm = ShootingSequenceController.SHOOTER_LOW_SPEED_RPM;
             return config;
         }
 

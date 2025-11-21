@@ -191,7 +191,7 @@ public class ZoomiesMode extends LinearOpMode {
             case 23:
                 return "🟣 🟣 🟢";
             default:
-                return "🟣 🟣 🟢";
+                return "⚫ ⚫ ⚫";
         }
     }
 }
