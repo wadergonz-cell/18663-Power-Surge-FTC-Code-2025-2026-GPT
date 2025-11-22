@@ -3,7 +3,7 @@ package org.firstinspires.ftc.teamcode;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 
-@Autonomous(name = "🔴RedAllianceCloseSide⚫", group = "Auto")
+@Autonomous(name = "🔴RedAlliance_FarSide⚫", group = "Auto")
 public class RedFarSide_FarShooting extends LinearOpMode {
 
     private robotHardware hardware;
@@ -42,10 +42,11 @@ public class RedFarSide_FarShooting extends LinearOpMode {
 
         drive.blockerDown();
 
-        drive.shoot(BlueAllianceFarSide.ShootConfig.rpmShots(3, 6600));
-        drive.pause(18);
-        drive.driveForward(-5, 1);
+        drive.shoot(BlueAllianceFarSide.ShootConfig.rpmShots(4, 10000));
+        drive.pause(17);
+        drive.driveForward(-10, 1);
         drive.turnDegrees(145, 0.7);
+        drive.pause(5);
 
         drive.stopIntakeContinuous();
         drive.stopAll();

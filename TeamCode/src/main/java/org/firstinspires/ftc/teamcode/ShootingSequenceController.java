@@ -72,8 +72,8 @@ public class ShootingSequenceController {
     private double rightShooterRpm = 0.0;
     private boolean longRangeMode = false;
     private static final double SHOOTER_KP = 0.0004;
-    private static final double SHOOTER_KI = 0.04;
-    private static final double SHOOTER_KD = 0.16;
+    private static final double SHOOTER_KI = 0.06;
+    private static final double SHOOTER_KD = 0.25;
 
     // Intake rotation targets (tune here for quick adjustments)
     private static final double INTAKE_REVERSE_ROTATIONS = 0.0; // retract a quarter turn for consistent staging

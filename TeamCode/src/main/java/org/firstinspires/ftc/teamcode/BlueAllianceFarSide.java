@@ -94,8 +94,8 @@ public class BlueAllianceFarSide extends LinearOpMode {
 
         // Shooter PID values mirrored from TeleOp
         private static final double SHOOTER_KP = 0.0004;
-        private static final double SHOOTER_KI = 0.04;
-        private static final double SHOOTER_KD = 0.16;
+        private static final double SHOOTER_KI = 0.06;
+        private static final double SHOOTER_KD = 0.25;
 
         // TeleOp-style shooting constants reused for autonomous firing
         private static final double INTAKE_ROTATION_SPEED = 0.3;
@@ -237,7 +237,7 @@ public class BlueAllianceFarSide extends LinearOpMode {
                     && !AprilTagHelper.hasStartZoneTag()) {
                 vision.update();
                 opMode.idle();
-                opMode.sleep((int) Math.round(RobotConstants.AUTO_ALIGN_POLL_INTERVAL_SEC * 1000));
+                opMode.sleep((int) Math.round(RobotConstants.AUTO_ALIGN_POLL_INTERVAL_SEC * 200));
             }
             return AprilTagHelper.getStartZoneTagId();
         }
@@ -257,7 +257,7 @@ public class BlueAllianceFarSide extends LinearOpMode {
                 if (info == null) {
                     setMotorPower(0.0);
                     opMode.idle();
-                    opMode.sleep((int) Math.round(RobotConstants.AUTO_ALIGN_POLL_INTERVAL_SEC * 1000));
+                    opMode.sleep((int) Math.round(RobotConstants.AUTO_ALIGN_POLL_INTERVAL_SEC * 200));
                     continue;
                 }
 
@@ -279,7 +279,7 @@ public class BlueAllianceFarSide extends LinearOpMode {
                 backRight.setPower(-turnPower);
 
                 opMode.idle();
-                opMode.sleep((int) Math.round(RobotConstants.AUTO_ALIGN_POLL_INTERVAL_SEC * 1000));
+                opMode.sleep((int) Math.round(RobotConstants.AUTO_ALIGN_POLL_INTERVAL_SEC * 200));
             }
 
             setMotorPower(0.0);
@@ -415,7 +415,7 @@ public class BlueAllianceFarSide extends LinearOpMode {
                 }
                 reportShooterTelemetry(targetRpm);
                 opMode.idle();
-                opMode.sleep(10);
+                opMode.sleep(2);
             }
             return false;
         }
@@ -443,7 +443,7 @@ public class BlueAllianceFarSide extends LinearOpMode {
             timer.reset();
             while (opMode.opModeIsActive() && timer.seconds() < seconds) {
                 opMode.idle();
-                opMode.sleep(10);
+                opMode.sleep(2);
             }
         }
 
@@ -561,7 +561,7 @@ public class BlueAllianceFarSide extends LinearOpMode {
         private double intakeAdvancePower = RobotConstants.AUTO_INTAKE_POWER;
         private double frontIntakeAdvancePower = RobotConstants.AUTO_FRONT_INTAKE_POWER;
         private double intakeAdvanceSeconds = RobotConstants.AUTO_INTAKE_ADVANCE_SECONDS;
-        private double readyTimeoutSec = 0.5;
+        private double readyTimeoutSec = 0.1;
 
         public static ShootConfig rpmShots(int shots, double targetRpm) {
             ShootConfig config = new ShootConfig();

@@ -42,24 +42,24 @@ public class BlueAllianceCloseSide extends LinearOpMode {
 
         drive.blockerDown();
 
-        drive.driveForward(50.0, 0.7);
+        drive.driveForward(50.0, 1);
         drive.shoot(BlueAllianceFarSide.ShootConfig.rpmShots(3, 2900));
 
-        drive.driveForward(7, 0.8);
-        drive.turnDegrees(60, 0.7);
+        drive.driveForward(7, 1);
+        drive.turnDegrees(60, 1);
         drive.startIntakeContinuous(0.8, -0.8);
-        drive.driveForward(-27, 0.8);
-        drive.pause(0.5);
+        drive.driveForward(-27, 1);
         drive.blockerDown();
-        drive.driveForward(-15, 0.8);
+        drive.driveForward(-15, 1);
         drive.stopIntakeContinuous();
-        drive.driveForward(38, 0.8);
+        drive.driveForward(38, 1);
         drive.turnDegrees(-72, 0.8);
         drive.driveForward(-8, 1);
-        drive.shoot(BlueAllianceFarSide.ShootConfig.rpmShots(3, 2900));
+        drive.shoot(BlueAllianceFarSide.ShootConfig.rpmShots(2, 2900));
         drive.turnDegrees(-60, 1);
         drive.driveForward(50, 1);
         drive.turnDegrees(-125, 1);
+        drive.pause(5);
 
 
 

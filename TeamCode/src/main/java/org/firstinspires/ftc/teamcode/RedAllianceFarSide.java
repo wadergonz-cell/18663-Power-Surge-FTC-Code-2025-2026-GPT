@@ -94,8 +94,8 @@ public class RedAllianceFarSide extends LinearOpMode {
 
         // Shooter PID values mirrored from TeleOp
         private static final double SHOOTER_KP = 0.0004;
-        private static final double SHOOTER_KI = 0.04;
-        private static final double SHOOTER_KD = 0.16;
+        private static final double SHOOTER_KI = 0.06;
+        private static final double SHOOTER_KD = 0.25;
 
         // TeleOp-style shooting constants reused for autonomous firing
         private static final double INTAKE_ROTATION_SPEED = 0.3;
